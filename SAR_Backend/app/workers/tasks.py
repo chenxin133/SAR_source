@@ -106,6 +106,34 @@ def _read_preview_with_gdal(path: str, max_size: int) -> np.ndarray:
     return arr
 
 
+def _read_preview_with_tifffile(path: str) -> np.ndarray:
+    try:
+        import tifffile
+    except Exception as e:
+        raise RuntimeError("tifffile not available") from e
+
+    with tifffile.TiffFile(path) as tif:
+        if tif.series:
+            arr = tif.series[0].asarray()
+        else:
+            arr = tif.asarray()
+    if arr is None:
+        raise RuntimeError("Failed to read TIFF with tifffile")
+    return np.asarray(arr)
+
+
+def _normalize_raster_shape(arr: np.ndarray) -> np.ndarray:
+    arr = np.squeeze(np.asarray(arr))
+    if arr.ndim == 2:
+        return arr
+    if arr.ndim == 3:
+        if arr.shape[0] <= 4:
+            return arr
+        if arr.shape[-1] <= 4:
+            return np.moveaxis(arr, -1, 0)
+    raise RuntimeError(f"Unsupported TIFF shape: {arr.shape!r}")
+
+
 def _to_uint8_gray(data: np.ndarray) -> np.ndarray:
     if np.iscomplexobj(data):
         data = np.abs(data)
@@ -152,6 +180,32 @@ def _to_uint8_rgb(arr: np.ndarray) -> np.ndarray:
     raise RuntimeError("Unsupported raster shape")
 
 
+def _resize_rgb(rgb_u8: np.ndarray, max_size: int) -> np.ndarray:
+    h, w = rgb_u8.shape[:2]
+    if w <= max_size and h <= max_size:
+        return rgb_u8
+
+    ratio = min(max_size / w, max_size / h)
+    tw = max(1, int(w * ratio))
+    th = max(1, int(h * ratio))
+
+    from PIL import Image as PILImage
+
+    img = PILImage.fromarray(rgb_u8, mode="RGB")
+    resized = img.resize((tw, th), resample=PILImage.Resampling.BILINEAR)
+    return np.asarray(resized)
+
+
+def _build_preview_rgb(path: str, max_size: int) -> np.ndarray:
+    try:
+        arr = _read_preview_with_gdal(path, max_size=max_size)
+        rgb = _to_uint8_rgb(arr)
+    except Exception:
+        arr = _read_preview_with_tifffile(path)
+        rgb = _to_uint8_rgb(_normalize_raster_shape(arr))
+    return _resize_rgb(rgb, max_size=max_size)
+
+
 def _save_webp(rgb_u8: np.ndarray, out_path: str, quality: int):
     from PIL import Image as PILImage
 
@@ -188,8 +242,7 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
                 p = 5 + (idx / max(1, len(levels))) * 80
                 _update_task(db=db, task_id=task_uuid, status="processing", progress=p)
 
-                arr = _read_preview_with_gdal(local_path, max_size=level)
-                rgb = _to_uint8_rgb(arr)
+                rgb = _build_preview_rgb(local_path, max_size=level)
                 out_path = os.path.join(tmp, f"preview_{level}.webp")
                 _save_webp(rgb, out_path, quality=quality)
 
