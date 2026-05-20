@@ -1,0 +1,9 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+celery[redis]==5.3.6
+redis==5.0.1
+Pillow-SIMD==9.0.0.post1
+numpy==1.26.3
+python-multipart==0.0.6
+# GDAL is usually installed via system package or specific wheel, listing here for reference
+# gdal==3.8.0 
