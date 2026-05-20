@@ -1,0 +1,32 @@
+﻿# Packaging outputs
+.build/
+SAR_exe/
+!SAR_exe/README.txt
+SAR_exe.zip
+SAR_exe_release_*.zip
+
+# Large sample data
+样本数据/
+
+# Runtime and generated data
+logs/
+temp/
+reports/*.json
+reports/*.txt
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Frontend build and dependencies
+**/node_modules/
+**/dist/
+**/.vite/
+
+# OS/editor files
+.DS_Store
+Thumbs.db

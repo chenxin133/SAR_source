@@ -1,0 +1,10 @@
+.idea
+Python
+.trae
+SAR_exe/
+SAR_exe.zip
+SAR_exe_release_*.zip
+SAR_Front/dist/
+.build/
+**/__pycache__/
+**/*.pyc
