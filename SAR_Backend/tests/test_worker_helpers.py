@@ -60,6 +60,18 @@ def test_build_preview_rgb_falls_back_without_gdal(monkeypatch):
     assert rgb.dtype == np.uint8
 
 
+def test_sample_raster_for_preview_downsamples_2d():
+    arr = np.arange(100, dtype=np.float32).reshape(10, 10)
+    sampled = tasks._sample_raster_for_preview(arr, max_size=4)
+    assert sampled.shape == (4, 4)
+
+
+def test_sample_raster_for_preview_handles_channel_last():
+    arr = np.zeros((10, 10, 3), dtype=np.float32)
+    sampled = tasks._sample_raster_for_preview(arr, max_size=4)
+    assert sampled.shape == (3, 4, 4)
+
+
 def test_enqueue_process_image_inline_uses_background_thread(db_session, monkeypatch):
     app_config._settings = None
     settings = app_config.get_settings()

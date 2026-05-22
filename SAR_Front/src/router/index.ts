@@ -22,7 +22,7 @@ const router = createRouter({
     {
       path: '/data/echo',
       name: 'echo-data',
-      component: () => import('../views/data/EchoDataView.vue')
+      redirect: { name: 'raw-data' }
     },
     // Satellite routes will be added dynamically or statically here
     {

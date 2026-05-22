@@ -106,20 +106,41 @@ def _read_preview_with_gdal(path: str, max_size: int) -> np.ndarray:
     return arr
 
 
-def _read_preview_with_tifffile(path: str) -> np.ndarray:
+def _sample_raster_for_preview(arr: np.ndarray, max_size: int) -> np.ndarray:
+    arr = np.squeeze(arr)
+    if arr.ndim == 2:
+        step_y = max(1, math.ceil(arr.shape[0] / max_size))
+        step_x = max(1, math.ceil(arr.shape[1] / max_size))
+        return np.asarray(arr[::step_y, ::step_x])
+    if arr.ndim == 3:
+        if arr.shape[0] <= 4:
+            step_y = max(1, math.ceil(arr.shape[1] / max_size))
+            step_x = max(1, math.ceil(arr.shape[2] / max_size))
+            return np.asarray(arr[:, ::step_y, ::step_x])
+        if arr.shape[-1] <= 4:
+            step_y = max(1, math.ceil(arr.shape[0] / max_size))
+            step_x = max(1, math.ceil(arr.shape[1] / max_size))
+            return np.asarray(np.moveaxis(arr[::step_y, ::step_x, :], -1, 0))
+    raise RuntimeError(f"Unsupported TIFF shape: {arr.shape!r}")
+
+
+def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
     try:
         import tifffile
     except Exception as e:
         raise RuntimeError("tifffile not available") from e
 
-    with tifffile.TiffFile(path) as tif:
-        if tif.series:
-            arr = tif.series[0].asarray()
-        else:
-            arr = tif.asarray()
+    try:
+        arr = tifffile.memmap(path)
+    except Exception:
+        with tifffile.TiffFile(path) as tif:
+            if tif.series:
+                arr = tif.series[0].asarray()
+            else:
+                arr = tif.asarray()
     if arr is None:
         raise RuntimeError("Failed to read TIFF with tifffile")
-    return np.asarray(arr)
+    return _sample_raster_for_preview(arr, max_size=max_size)
 
 
 def _normalize_raster_shape(arr: np.ndarray) -> np.ndarray:
@@ -201,7 +222,7 @@ def _build_preview_rgb(path: str, max_size: int) -> np.ndarray:
         arr = _read_preview_with_gdal(path, max_size=max_size)
         rgb = _to_uint8_rgb(arr)
     except Exception:
-        arr = _read_preview_with_tifffile(path)
+        arr = _read_preview_with_tifffile(path, max_size=max_size)
         rgb = _to_uint8_rgb(_normalize_raster_shape(arr))
     return _resize_rgb(rgb, max_size=max_size)
 

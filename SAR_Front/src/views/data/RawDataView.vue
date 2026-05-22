@@ -20,10 +20,18 @@
         <el-option label="失败" value="failed" />
       </el-select>
       <el-input v-model="satelliteFilter" placeholder="筛选卫星源" clearable style="width: 180px" />
+      <el-input v-model="regionFilter" placeholder="筛选地区/备注" clearable style="width: 180px" />
+      <el-input v-model="polarizationFilter" placeholder="筛选极化方式" clearable style="width: 180px" />
     </div>
 
     <!-- Data Table -->
-    <el-table :data="filteredImages" style="width: 100%" border v-loading="store.loading">
+    <el-table
+      :data="filteredImages"
+      :empty-text="tableEmptyText"
+      style="width: 100%"
+      border
+      v-loading="store.loading"
+    >
       <el-table-column prop="id" label="ID" width="220" />
       <el-table-column prop="name" label="影像名称" min-width="200" />
       <el-table-column v-if="!isBackendMode" prop="satellite" label="卫星源" width="150" />
@@ -130,6 +138,8 @@ const isBackendMode = computed(() => getStorageMode() === 'backend')
 const keyword = ref('')
 const statusFilter = ref('')
 const satelliteFilter = ref('')
+const regionFilter = ref('')
+const polarizationFilter = ref('')
 
 onMounted(() => {
     store.fetchImages()
@@ -139,15 +149,37 @@ const filteredImages = computed(() => {
     const keywordValue = keyword.value.trim().toLowerCase()
     const statusValue = statusFilter.value.trim().toLowerCase()
     const satelliteValue = satelliteFilter.value.trim().toLowerCase()
+    const regionValue = regionFilter.value.trim().toLowerCase()
+    const polarizationValue = polarizationFilter.value.trim().toLowerCase()
     return store.images.filter((img) => {
+        const nameValue = String(img.name || '').toLowerCase()
+        const descriptionValue = String(img.description || '').toLowerCase()
+        const satelliteText = String(img.satellite || '').toLowerCase()
+        const polarizationText = String(img.polarization || '').toLowerCase()
         const matchKeyword =
             !keywordValue ||
             img.id.toLowerCase().includes(keywordValue) ||
-            img.name.toLowerCase().includes(keywordValue)
+            nameValue.includes(keywordValue)
         const matchStatus = !statusValue || String(img.status || '').toLowerCase() === statusValue
-        const matchSatellite = !satelliteValue || String(img.satellite || '').toLowerCase().includes(satelliteValue)
-        return matchKeyword && matchStatus && matchSatellite
+        const matchSatellite = !satelliteValue || satelliteText.includes(satelliteValue)
+        const matchRegion = !regionValue || descriptionValue.includes(regionValue)
+        const matchPolarization = !polarizationValue || polarizationText.includes(polarizationValue)
+        return matchKeyword && matchStatus && matchSatellite && matchRegion && matchPolarization
     })
+})
+
+const hasActiveFilters = computed(() => {
+    return [
+        keyword.value,
+        statusFilter.value,
+        satelliteFilter.value,
+        regionFilter.value,
+        polarizationFilter.value,
+    ].some((value) => String(value || '').trim().length > 0)
+})
+
+const tableEmptyText = computed(() => {
+    return hasActiveFilters.value ? '没有匹配的原始影像' : '暂无原始影像'
 })
 
 const isTiffFile = (name?: string) => {

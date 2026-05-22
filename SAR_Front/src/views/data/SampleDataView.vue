@@ -17,7 +17,7 @@
       <el-input v-model="sourceFilter" placeholder="筛选来源影像" clearable style="width: 220px" />
     </div>
 
-    <el-table :data="filteredTableData" style="width: 100%" border>
+    <el-table :data="filteredTableData" :empty-text="tableEmptyText" style="width: 100%" border>
       <el-table-column prop="id" label="样本ID" width="120" />
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="category" label="类别" width="140" />
@@ -33,8 +33,6 @@
         </template>
       </el-table-column>
     </el-table>
-
-    <el-empty v-if="tableData.length === 0" description="暂无样本数据" style="margin-top: 18px" />
 
     <el-dialog v-model="previewVisible" title="样本预览" width="760px" destroy-on-close @closed="clearPreview">
       <el-image v-if="previewUrl" :src="previewUrl" fit="contain" style="width: 100%; height: 420px; background: #111" />
@@ -109,6 +107,16 @@ const filteredTableData = computed<Row[]>(() => {
     const matchSource = !sourceValue || row.source.toLowerCase().includes(sourceValue)
     return matchKeyword && matchCategory && matchAnnotation && matchSource
   })
+})
+
+const hasActiveFilters = computed(() => {
+  return [keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value].some(
+    (value) => String(value || '').trim().length > 0
+  )
+})
+
+const tableEmptyText = computed(() => {
+  return hasActiveFilters.value ? '没有匹配的样本数据' : '暂无样本数据'
 })
 
 const previewVisible = ref(false)
