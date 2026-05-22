@@ -19,3 +19,13 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+interface SarDesktopBridge {
+  getRuntimeInfo(): Promise<unknown>
+  pingBackend(): Promise<{ ok: boolean }>
+  openExternal(url: string): Promise<{ ok: true }>
+}
+
+interface Window {
+  sarDesktop?: SarDesktopBridge
+}
