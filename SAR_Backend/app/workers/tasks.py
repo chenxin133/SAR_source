@@ -32,6 +32,37 @@ def _levels() -> list[int]:
     return sorted(set([x for x in levels if x > 0]), reverse=True) or [1024, 512, 256]
 
 
+def _describe_preview_error(error: Exception, local_path: str) -> str:
+    raw_message = str(error).strip() or error.__class__.__name__
+    normalized_candidates = {
+        local_path,
+        local_path.replace("\\", "/"),
+        repr(local_path),
+        repr(local_path.replace("\\", "/")),
+    }
+    if raw_message in normalized_candidates:
+        return "无法读取上传后的 TIFF 临时文件，请检查原始影像是否损坏、格式是否受支持，或文件是否仍被其他程序占用。"
+
+    sanitized = raw_message
+    for candidate in normalized_candidates:
+        sanitized = sanitized.replace(candidate, "临时 TIFF 文件")
+
+    lowered = sanitized.lower()
+    if "gdal not available" in lowered:
+        return "预览生成失败：当前环境缺少 GDAL，已尝试回退读取但未成功。"
+    if "failed to open raster" in lowered or "failed to read raster" in lowered:
+        return "预览生成失败：无法打开或读取 TIFF 栅格数据。"
+    if "failed to read tiff" in lowered or "unsupported tiff shape" in lowered or "unsupported raster shape" in lowered:
+        return f"预览生成失败：{sanitized}"
+    if "cannot identify image file" in lowered or "unidentifiedimageerror" in lowered:
+        return "预览生成失败：Pillow 无法识别该 TIFF 文件。"
+    if "permission denied" in lowered:
+        return "预览生成失败：临时 TIFF 文件访问被拒绝。"
+    if "no such file or directory" in lowered or "file not found" in lowered:
+        return "预览生成失败：临时 TIFF 文件不存在，处理过程可能被中断。"
+    return f"预览生成失败：{sanitized}"
+
+
 def _parse_datetime(value):
     if value is None:
         return None
@@ -340,9 +371,10 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
         _update_task(db=db, task_id=task_uuid, status="succeeded", progress=100, result={"thumbnails": produced})
         return {"ok": True, "thumbnails": produced}
     except Exception as e:
+        friendly_error = _describe_preview_error(e, local_path) if "local_path" in locals() else str(e)
         try:
-            _update_task(db=db, task_id=task_uuid, status="failed", progress=100, error=str(e))
-            _update_image_status(db=db, image_id=image_uuid, status="failed", error=str(e))
+            _update_task(db=db, task_id=task_uuid, status="failed", progress=100, error=friendly_error)
+            _update_image_status(db=db, image_id=image_uuid, status="failed", error=friendly_error)
         except Exception:
             pass
 
