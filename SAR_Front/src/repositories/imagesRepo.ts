@@ -45,7 +45,8 @@ const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): Sa
     thumbnailUrl: thumbnailUrl ?? previewUrl ?? sameOriginPreviewUrl,
     originalPersistent: true,
     previewPersistent: !!(previewUrl ?? sameOriginPreviewUrl),
-    previewNotice: undefined
+    previewNotice: undefined,
+    errorMessage: String(img.error_message ?? '')
   }
 }
 

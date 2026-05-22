@@ -13,6 +13,7 @@ export interface SarImage {
   previewPersistent?: boolean;
   originalPersistent?: boolean;
   previewNotice?: string;
+  errorMessage?: string;
 }
 
 export interface UploadPayload {

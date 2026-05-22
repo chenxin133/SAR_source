@@ -10,6 +10,10 @@ const router = createRouter({
       component: HomeView
     },
     {
+      path: '/data',
+      redirect: { name: 'raw-data' }
+    },
+    {
       path: '/data/raw',
       name: 'raw-data',
       component: () => import('../views/data/RawDataView.vue')

@@ -556,6 +556,9 @@ const loadImageToCanvas = async (imageId: string) => {
 
   canvasLoading.value = true
   try {
+    if (String(meta.status || '').toLowerCase() === 'failed' && meta.errorMessage) {
+      throw new Error(`影像预处理失败：${meta.errorMessage}`)
+    }
     const blob = await imagesRepo.getFile(imageId)
     const sameOriginPreview = `/api/v1/images/${encodeURIComponent(imageId)}/preview`
     const fallbackPreviewUrl = meta.previewUrl || meta.thumbnailUrl || sameOriginPreview

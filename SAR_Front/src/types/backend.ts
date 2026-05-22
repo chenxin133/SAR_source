@@ -20,6 +20,7 @@ export type ApiImageOut = {
   width?: number | null
   height?: number | null
   status: string
+  error_message?: string | null
   created_at: string
   updated_at: string
 }

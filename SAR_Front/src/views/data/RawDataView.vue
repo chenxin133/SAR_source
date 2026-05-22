@@ -42,6 +42,12 @@
           <el-tag :type="getStatusTagType(scope.row.status)">{{ scope.row.status }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="失败原因" min-width="220">
+        <template #default="scope">
+          <span v-if="scope.row.errorMessage">{{ scope.row.errorMessage }}</span>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="300" fixed="right">
         <template #default="scope">
           <el-button size="small" type="primary" plain @click="handlePreview(scope.row)">
@@ -92,6 +98,9 @@
             <el-descriptions-item v-if="!isBackendMode" label="极化方式">{{ selectedImage.polarization || '-' }}</el-descriptions-item>
             <el-descriptions-item label="状态">
                 <el-tag size="small">{{ selectedImage.status }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="selectedImage.errorMessage" label="失败原因">
+                <span class="error-text">{{ selectedImage.errorMessage }}</span>
             </el-descriptions-item>
             <el-descriptions-item v-if="selectedImage.originalPersistent === false" label="预览提示">
                 <el-alert
@@ -249,6 +258,10 @@ const handlePreview = async (row: SarImage) => {
         ElMessage.warning(row.previewNotice || '原图超过 200MB，仅当前会话可用，刷新后若无持久化预览将无法打开。')
         return
     }
+    if (row.errorMessage) {
+        ElMessage.error(`当前影像预览生成失败：${row.errorMessage}`)
+        return
+    }
     ElMessage.info('该影像暂无可预览文件，可重新上传或生成预览后再试。')
 }
 
@@ -296,5 +309,10 @@ const handleDelete = (row: SarImage) => {
     cursor: pointer;
     border: 1px solid #dcdfe6;
     border-radius: 4px;
+}
+.error-text {
+    color: #f56c6c;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 </style>

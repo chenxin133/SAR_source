@@ -63,6 +63,7 @@ def list_images(
             width=r.width,
             height=r.height,
             status=r.status,
+            error_message=r.error_message,
             created_at=r.created_at,
             updated_at=r.updated_at,
         )
@@ -113,6 +114,7 @@ def get_image(
         width=image.width,
         height=image.height,
         status=image.status,
+        error_message=image.error_message,
         created_at=image.created_at,
         updated_at=image.updated_at,
         thumbnails=thumb_out,

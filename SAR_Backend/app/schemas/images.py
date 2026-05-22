@@ -19,6 +19,7 @@ class ImageOut(BaseModel):
     width: int | None = None
     height: int | None = None
     status: str
+    error_message: str | None = None
     created_at: datetime
     updated_at: datetime
 
