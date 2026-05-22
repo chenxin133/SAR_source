@@ -7,7 +7,17 @@
       </el-button>
     </div>
 
-    <el-table :data="tableData" style="width: 100%" border>
+    <div class="filter-bar">
+      <el-input v-model="keyword" placeholder="筛选名称 / 样本ID" clearable style="width: 240px" />
+      <el-input v-model="categoryFilter" placeholder="筛选类别" clearable style="width: 180px" />
+      <el-select v-model="annotationFilter" placeholder="全部标注类型" clearable style="width: 160px">
+        <el-option label="矩形" value="rect" />
+        <el-option label="多边形" value="polygon" />
+      </el-select>
+      <el-input v-model="sourceFilter" placeholder="筛选来源影像" clearable style="width: 220px" />
+    </div>
+
+    <el-table :data="filteredTableData" style="width: 100%" border>
       <el-table-column prop="id" label="样本ID" width="120" />
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="category" label="类别" width="140" />
@@ -60,6 +70,10 @@ type Row = {
 }
 
 const samples = ref<SarSample[]>([])
+const keyword = ref('')
+const categoryFilter = ref('')
+const annotationFilter = ref('')
+const sourceFilter = ref('')
 
 const formatTime = (ts: number) => {
   const d = new Date(ts)
@@ -78,6 +92,23 @@ const tableData = computed<Row[]>(() => {
     time: formatTime(s.updatedAt || s.createdAt),
     raw: s
   }))
+})
+
+const filteredTableData = computed<Row[]>(() => {
+  const keywordValue = keyword.value.trim().toLowerCase()
+  const categoryValue = categoryFilter.value.trim().toLowerCase()
+  const annotationValue = annotationFilter.value.trim().toLowerCase()
+  const sourceValue = sourceFilter.value.trim().toLowerCase()
+  return tableData.value.filter((row) => {
+    const matchKeyword =
+      !keywordValue ||
+      row.id.toLowerCase().includes(keywordValue) ||
+      row.name.toLowerCase().includes(keywordValue)
+    const matchCategory = !categoryValue || row.category.toLowerCase().includes(categoryValue)
+    const matchAnnotation = !annotationValue || row.raw.annotationType.toLowerCase() === annotationValue
+    const matchSource = !sourceValue || row.source.toLowerCase().includes(sourceValue)
+    return matchKeyword && matchCategory && matchAnnotation && matchSource
+  })
 })
 
 const previewVisible = ref(false)
@@ -138,6 +169,13 @@ onMounted(async () => {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+}
+
+.filter-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
 }
 
 .preview-meta {

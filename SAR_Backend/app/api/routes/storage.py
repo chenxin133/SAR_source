@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from app.storage import local_object_path, use_local_storage
+from app.storage import guess_content_type, local_object_path, use_local_storage
 
 router = APIRouter()
 
@@ -18,4 +18,4 @@ def get_local_storage_object(bucket: str, key: str):
         raise HTTPException(status_code=400, detail="Invalid key")
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Object not found")
-    return FileResponse(str(p))
+    return FileResponse(str(p), media_type=guess_content_type(p))

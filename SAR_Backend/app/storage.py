@@ -20,6 +20,16 @@ class PutObjectResult:
 
 _s3 = None
 _s3_presign = None
+_KNOWN_CONTENT_TYPES = {
+    ".webp": "image/webp",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
 
 
 def use_local_storage() -> bool:
@@ -31,6 +41,15 @@ def _local_bucket_dir(bucket: str) -> Path:
     settings = get_settings()
     base = Path(settings.local_storage_dir).resolve()
     return (base / bucket).resolve()
+
+
+def guess_content_type(name: str | Path | None) -> str:
+    if not name:
+        return "application/octet-stream"
+    suffix = Path(name).suffix.lower()
+    if suffix in _KNOWN_CONTENT_TYPES:
+        return _KNOWN_CONTENT_TYPES[suffix]
+    return mimetypes.guess_type(str(name))[0] or "application/octet-stream"
 
 
 def local_object_path(*, bucket: str, key: str) -> Path:
@@ -98,7 +117,7 @@ def put_file(*, bucket: str, key: str, file_path: str, content_type: str | None 
         shutil.copy2(file_path, dst)
         return PutObjectResult(bucket=bucket, key=key)
     s3 = get_s3_client()
-    ct = content_type or mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    ct = content_type or guess_content_type(file_path)
     s3.upload_file(file_path, bucket, key, ExtraArgs={"ContentType": ct})
     return PutObjectResult(bucket=bucket, key=key)
 
@@ -138,7 +157,7 @@ def read_object_bytes(*, bucket: str, key: str) -> tuple[bytes, str]:
     if use_local_storage():
         p = local_object_path(bucket=bucket, key=key)
         data = p.read_bytes()
-        ct = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+        ct = guess_content_type(p)
         return data, ct
     s3 = get_s3_client()
     obj = s3.get_object(Bucket=bucket, Key=key)

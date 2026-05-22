@@ -23,7 +23,7 @@ from app.schemas.images import (
     UploadInitRequest,
     UploadInitResponse,
 )
-from app.storage import delete_object, presign_get_url, put_file, read_object_bytes
+from app.storage import delete_object, guess_content_type, presign_get_url, put_file, read_object_bytes
 from app.upload_service import assemble, cleanup, init_upload, write_part
 from app.workers.client import enqueue_process_image
 
@@ -286,6 +286,8 @@ def get_preview_content(
         content, media_type = read_object_bytes(bucket=settings.s3_bucket, key=t.storage_key)
     except Exception:
         raise HTTPException(status_code=404, detail="Preview object not found")
-    if not media_type:
+    if not media_type or media_type == "application/octet-stream":
+        media_type = guess_content_type(t.storage_key)
+    if not media_type or media_type == "application/octet-stream":
         media_type = f"image/{(t.format or 'webp').lower()}"
     return Response(content=content, media_type=media_type)

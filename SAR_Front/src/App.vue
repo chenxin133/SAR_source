@@ -23,7 +23,6 @@ import { entrySatellites } from './constants/satellites'
           </template>
           <el-menu-item index="/data/raw">原始影像</el-menu-item>
           <el-menu-item index="/data/samples">样本数据</el-menu-item>
-          <el-menu-item index="/data/echo">回波信号</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="2">

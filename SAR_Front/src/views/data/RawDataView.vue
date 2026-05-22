@@ -10,8 +10,20 @@
       </div>
     </div>
 
+    <div class="filter-bar">
+      <el-input v-model="keyword" placeholder="筛选名称 / ID" clearable style="width: 240px" />
+      <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
+        <el-option label="待处理" value="pending" />
+        <el-option label="处理中" value="processing" />
+        <el-option label="已上传" value="uploaded" />
+        <el-option label="已就绪" value="ready" />
+        <el-option label="失败" value="failed" />
+      </el-select>
+      <el-input v-model="satelliteFilter" placeholder="筛选卫星源" clearable style="width: 180px" />
+    </div>
+
     <!-- Data Table -->
-    <el-table :data="store.images" style="width: 100%" border v-loading="store.loading">
+    <el-table :data="filteredImages" style="width: 100%" border v-loading="store.loading">
       <el-table-column prop="id" label="ID" width="220" />
       <el-table-column prop="name" label="影像名称" min-width="200" />
       <el-table-column v-if="!isBackendMode" prop="satellite" label="卫星源" width="150" />
@@ -115,9 +127,27 @@ import { exportLocalDataPackage } from '../../utils/migrationExport'
 const store = useRawDataStore()
 const router = useRouter()
 const isBackendMode = computed(() => getStorageMode() === 'backend')
+const keyword = ref('')
+const statusFilter = ref('')
+const satelliteFilter = ref('')
 
 onMounted(() => {
     store.fetchImages()
+})
+
+const filteredImages = computed(() => {
+    const keywordValue = keyword.value.trim().toLowerCase()
+    const statusValue = statusFilter.value.trim().toLowerCase()
+    const satelliteValue = satelliteFilter.value.trim().toLowerCase()
+    return store.images.filter((img) => {
+        const matchKeyword =
+            !keywordValue ||
+            img.id.toLowerCase().includes(keywordValue) ||
+            img.name.toLowerCase().includes(keywordValue)
+        const matchStatus = !statusValue || String(img.status || '').toLowerCase() === statusValue
+        const matchSatellite = !satelliteValue || String(img.satellite || '').toLowerCase().includes(satelliteValue)
+        return matchKeyword && matchStatus && matchSatellite
+    })
 })
 
 const isTiffFile = (name?: string) => {
@@ -219,6 +249,12 @@ const handleDelete = (row: SarImage) => {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+}
+.filter-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
 }
 .progress-bar {
     margin-top: 10px;
