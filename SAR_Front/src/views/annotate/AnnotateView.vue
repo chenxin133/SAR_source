@@ -748,6 +748,17 @@ const buildPolygonObjectFromAbs = (
   ))
 }
 
+const setPolygonAbsPoints = (poly: Polygon, pts: XY[]) => {
+  const norm = normalizeAbsPoints(pts)
+  poly.set({
+    left: norm.left,
+    top: norm.top,
+    points: norm.points.map((p) => ({ x: p.x, y: p.y })) as any
+  })
+  poly.setBoundingBox(true)
+  poly.setCoords()
+}
+
 const newSampleId = () => `SMP_${Date.now()}_${Math.random().toString(16).slice(2)}`
 
 const canvasToBlob = (c: HTMLCanvasElement, type: SarSample['format'], quality?: number) => {
@@ -1341,7 +1352,7 @@ const bindCanvasEvents = () => {
         { x: p0.x, y: p0.y },
         { x: p0.x, y: p0.y }
       ]
-      drawingRect = applyRotateCursor(new Polygon(abs as any, {
+      drawingRect = buildPolygonObjectFromAbs(abs, {
         fill: 'rgba(64,158,255,0.18)',
         stroke: '#409EFF',
         strokeWidth: 2,
@@ -1351,8 +1362,7 @@ const bindCanvasEvents = () => {
         objectCaching: false,
         selectable: false,
         evented: false
-      }))
-      drawingRect.setBoundingBox(true)
+      })
       canvas.add(drawingRect)
       canvas.requestRenderAll()
       return
@@ -1422,9 +1432,7 @@ const bindCanvasEvents = () => {
         { x: p11.x, y: p11.y },
         { x: p01.x, y: p01.y }
       ]
-      drawingRect.set({ points: abs.map((p) => ({ x: p.x, y: p.y })) as any })
-      drawingRect.setBoundingBox(true)
-      drawingRect.setCoords()
+      setPolygonAbsPoints(drawingRect, abs)
       canvas.requestRenderAll()
       return
     }
