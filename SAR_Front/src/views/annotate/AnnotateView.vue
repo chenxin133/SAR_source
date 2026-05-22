@@ -607,7 +607,7 @@ const renderAnnotations = () => {
     for (const a of annotations.value) {
       if (a.type === 'rect') {
         const pts = ((a as any).points as XY[] | undefined) ?? rectToPoints(a.rect)
-        const obj = buildPolygonObjectFromAbs(
+        const obj = buildRectObjectFromAbs(
           pts.map((p) => ({ x: p.x, y: p.y })),
           {
             fill: 'rgba(64,158,255,0.18)',
@@ -748,15 +748,58 @@ const buildPolygonObjectFromAbs = (
   ))
 }
 
-const setPolygonAbsPoints = (poly: Polygon, pts: XY[]) => {
-  const norm = normalizeAbsPoints(pts)
-  poly.set({
-    left: norm.left,
-    top: norm.top,
-    points: norm.points.map((p) => ({ x: p.x, y: p.y })) as any
+const getRectMetricsFromAbsPoints = (pts: XY[]) => {
+  const p0 = pts[0]
+  const p1 = pts[1] || p0
+  const p2 = pts[2] || p1
+  const p3 = pts[3] || p0
+  const centerX = (p0.x + p2.x) / 2
+  const centerY = (p0.y + p2.y) / 2
+  const width = Math.hypot(p1.x - p0.x, p1.y - p0.y)
+  const height = Math.hypot(p3.x - p0.x, p3.y - p0.y)
+  const angle = (Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180) / Math.PI
+  return { centerX, centerY, width, height, angle }
+}
+
+const buildRectObjectFromAbs = (pts: XY[], opts?: Partial<ConstructorParameters<typeof Rect>[0]>) => {
+  const m = getRectMetricsFromAbsPoints(pts)
+  return applyRotateCursor(new Rect({
+    left: m.centerX,
+    top: m.centerY,
+    originX: 'center',
+    originY: 'center',
+    width: Math.max(1, m.width),
+    height: Math.max(1, m.height),
+    angle: m.angle,
+    fill: 'rgba(64,158,255,0.18)',
+    stroke: '#409EFF',
+    strokeWidth: 2,
+    transparentCorners: false,
+    cornerColor: '#409EFF',
+    objectCaching: false,
+    ...(opts || {})
+  }))
+}
+
+const setRectAbsPoints = (rect: Rect, pts: XY[]) => {
+  const m = getRectMetricsFromAbsPoints(pts)
+  rect.set({
+    left: m.centerX,
+    top: m.centerY,
+    originX: 'center',
+    originY: 'center',
+    width: Math.max(1, m.width),
+    height: Math.max(1, m.height),
+    angle: m.angle,
+    scaleX: 1,
+    scaleY: 1
   })
-  poly.setBoundingBox(true)
-  poly.setCoords()
+  rect.setCoords()
+}
+
+const extractRectAbsPoints = (rect: Rect): XY[] => {
+  const coords = rect.getCoords()
+  return coords.map((p) => ({ x: p.x, y: p.y }))
 }
 
 const newSampleId = () => `SMP_${Date.now()}_${Math.random().toString(16).slice(2)}`
@@ -993,50 +1036,23 @@ const confirmMeta = async () => {
 
   let ann: SarAnnotation | null = null
   if (pendingType === 'rect') {
-    if ((pendingObject as any).type === 'polygon') {
-      const p = pendingObject as Polygon
-      const pts = extractPolygonAbsPoints(p)
-      const obj = buildPolygonObjectFromAbs(pts, {
-        fill: 'rgba(64,158,255,0.18)',
-        stroke: '#409EFF',
-        cornerColor: '#409EFF'
-      })
-      canvas.remove(p)
-      canvas.add(obj)
-      pendingObject = obj
-      const xs = pts.map((q) => q.x)
-      const ys = pts.map((q) => q.y)
-      const minX = Math.min(...xs)
-      const minY = Math.min(...ys)
-      const maxX = Math.max(...xs)
-      const maxY = Math.max(...ys)
-      ann = {
-        id,
-        type: 'rect',
-        category: metaDraft.value.category,
-        remark: metaDraft.value.remark,
-        createdAt: now,
-        updatedAt: now,
-        rect: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
-        points: pts
-      }
-    } else {
-      const r = pendingObject as Rect
-      const left = (r.left ?? 0) as number
-      const top = (r.top ?? 0) as number
-      const w = ((r.width ?? 0) as number) * ((r.scaleX ?? 1) as number)
-      const h = ((r.height ?? 0) as number) * ((r.scaleY ?? 1) as number)
-      r.set({ width: w, height: h, scaleX: 1, scaleY: 1 })
-      r.setCoords()
-      ann = {
-        id,
-        type: 'rect',
-        category: metaDraft.value.category,
-        remark: metaDraft.value.remark,
-        createdAt: now,
-        updatedAt: now,
-        rect: { x: left, y: top, w, h }
-      }
+    const r = pendingObject as Rect
+    const pts = extractRectAbsPoints(r)
+    const xs = pts.map((q) => q.x)
+    const ys = pts.map((q) => q.y)
+    const minX = Math.min(...xs)
+    const minY = Math.min(...ys)
+    const maxX = Math.max(...xs)
+    const maxY = Math.max(...ys)
+    ann = {
+      id,
+      type: 'rect',
+      category: metaDraft.value.category,
+      remark: metaDraft.value.remark,
+      createdAt: now,
+      updatedAt: now,
+      rect: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+      points: pts
     }
   } else {
     const p = pendingObject as Polygon
@@ -1089,7 +1105,7 @@ let isSpaceDown = false
 let isDrawingRect = false
 let rectStartVp = { x: 0, y: 0 }
 let rectEndVp = { x: 0, y: 0 }
-let drawingRect: Polygon | null = null
+let drawingRect: Rect | null = null
 
 let polyPoints: XY[] = []
 let drawingLine: Polyline | null = null
@@ -1267,22 +1283,7 @@ const syncObjectToModel = (obj: Rect | Polygon) => {
 
   if (annotations.value[idx]?.type === 'rect' && obj.type === 'rect') {
     const r = obj as Rect
-    const left = (r.left ?? 0) as number
-    const top = (r.top ?? 0) as number
-    const w = ((r.width ?? 0) as number) * ((r.scaleX ?? 1) as number)
-    const h = ((r.height ?? 0) as number) * ((r.scaleY ?? 1) as number)
-    r.set({ width: w, height: h, scaleX: 1, scaleY: 1 })
-    r.setCoords()
-    const cur = annotations.value[idx] as any
-    const next = cloneAnnotations(annotations.value)
-    next[idx] = { ...cur, updatedAt: now, rect: { x: left, y: top, w, h } }
-    applyAnnotations(next, true)
-    return
-  }
-
-  if (annotations.value[idx]?.type === 'rect' && obj.type === 'polygon') {
-    const p = obj as Polygon
-    const pts = extractPolygonAbsPoints(p)
+    const pts = extractRectAbsPoints(r)
     const xs = pts.map((q) => q.x)
     const ys = pts.map((q) => q.y)
     const minX = Math.min(...xs)
@@ -1352,7 +1353,7 @@ const bindCanvasEvents = () => {
         { x: p0.x, y: p0.y },
         { x: p0.x, y: p0.y }
       ]
-      drawingRect = buildPolygonObjectFromAbs(abs, {
+      drawingRect = buildRectObjectFromAbs(abs, {
         fill: 'rgba(64,158,255,0.18)',
         stroke: '#409EFF',
         strokeWidth: 2,
@@ -1432,7 +1433,7 @@ const bindCanvasEvents = () => {
         { x: p11.x, y: p11.y },
         { x: p01.x, y: p01.y }
       ]
-      setPolygonAbsPoints(drawingRect, abs)
+      setRectAbsPoints(drawingRect, abs)
       canvas.requestRenderAll()
       return
     }
