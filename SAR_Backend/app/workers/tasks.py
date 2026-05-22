@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import math
 import os
+import shutil
 import tempfile
+import time
 import uuid
+import gc
 from datetime import datetime
 from zipfile import ZipFile
 
@@ -61,6 +64,21 @@ def _describe_preview_error(error: Exception, local_path: str) -> str:
     if "no such file or directory" in lowered or "file not found" in lowered:
         return "预览生成失败：临时 TIFF 文件不存在，处理过程可能被中断。"
     return f"预览生成失败：{sanitized}"
+
+
+def _cleanup_temp_dir(path: str) -> None:
+    if not path or not os.path.isdir(path):
+        return
+    for _ in range(5):
+        try:
+            gc.collect()
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            time.sleep(0.3)
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def _parse_datetime(value):
@@ -331,7 +349,8 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
         quality = int(settings.thumbnail_quality)
         levels = _levels()
 
-        with tempfile.TemporaryDirectory() as tmp:
+        tmp = tempfile.mkdtemp()
+        try:
             local_path = os.path.join(tmp, "raw.tif")
             download_object_to_file(bucket=bucket, key=img.storage_key, file_path=local_path)
 
@@ -379,11 +398,13 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
                 db.commit()
                 produced[str(level)] = storage_key
 
-        img.status = "ready"
-        img.updated_at = datetime.utcnow()
-        db.commit()
-        _update_task(db=db, task_id=task_uuid, status="succeeded", progress=100, result={"thumbnails": produced})
-        return {"ok": True, "thumbnails": produced}
+            img.status = "ready"
+            img.updated_at = datetime.utcnow()
+            db.commit()
+            _update_task(db=db, task_id=task_uuid, status="succeeded", progress=100, result={"thumbnails": produced})
+            return {"ok": True, "thumbnails": produced}
+        finally:
+            _cleanup_temp_dir(tmp)
     except Exception as e:
         friendly_error = _describe_preview_error(e, local_path) if "local_path" in locals() else str(e)
         try:
