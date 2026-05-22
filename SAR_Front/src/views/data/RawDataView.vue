@@ -226,8 +226,9 @@ const handlePreview = async (row: SarImage) => {
     previewTitle.value = row.name
     previewBlob.value = undefined
     previewUrl.value = ''
+    const sameOriginPreview = `/api/v1/images/${encodeURIComponent(row.id)}/preview`
 
-    const lightweightPreview = row.previewUrl || row.thumbnailUrl
+    const lightweightPreview = row.previewUrl || row.thumbnailUrl || (isBackendMode.value ? sameOriginPreview : '')
     if (lightweightPreview) {
         previewUrl.value = lightweightPreview
         previewVisible.value = true

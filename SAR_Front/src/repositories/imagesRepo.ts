@@ -28,6 +28,9 @@ const pickPreviewUrls = (thumbs: ApiThumbnailOut[]) => {
 
 const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): SarImage => {
   const { previewUrl, thumbnailUrl } = thumbs ? pickPreviewUrls(thumbs) : { previewUrl: undefined, thumbnailUrl: undefined }
+  const statusValue = String(img.status || '').toLowerCase()
+  const sameOriginPreviewUrl =
+    statusValue === 'ready' ? `/api/v1/images/${encodeURIComponent(String(img.id))}/preview` : undefined
   return {
     id: String(img.id),
     name: img.name,
@@ -38,10 +41,10 @@ const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): Sa
     polarization: String(img.polarization ?? ''),
     status: img.status,
     description: String(img.description ?? ''),
-    previewUrl,
-    thumbnailUrl,
+    previewUrl: previewUrl ?? sameOriginPreviewUrl,
+    thumbnailUrl: thumbnailUrl ?? previewUrl ?? sameOriginPreviewUrl,
     originalPersistent: true,
-    previewPersistent: !!previewUrl,
+    previewPersistent: !!(previewUrl ?? sameOriginPreviewUrl),
     previewNotice: undefined
   }
 }

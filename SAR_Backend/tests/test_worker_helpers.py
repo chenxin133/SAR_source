@@ -60,6 +60,16 @@ def test_build_preview_rgb_falls_back_without_gdal(monkeypatch):
     assert rgb.dtype == np.uint8
 
 
+def test_build_preview_rgb_falls_back_to_pillow(monkeypatch):
+    monkeypatch.setattr(tasks, "_read_preview_with_gdal", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("no gdal")))
+    monkeypatch.setattr(tasks, "_read_preview_with_tifffile", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("no tifffile")))
+    monkeypatch.setattr(tasks, "_read_preview_with_pillow", lambda *_args, **_kwargs: np.ones((6, 6, 3), dtype=np.uint8))
+
+    rgb = tasks._build_preview_rgb("dummy.tif", max_size=4)
+    assert rgb.shape == (4, 4, 3)
+    assert rgb.dtype == np.uint8
+
+
 def test_sample_raster_for_preview_downsamples_2d():
     arr = np.arange(100, dtype=np.float32).reshape(10, 10)
     sampled = tasks._sample_raster_for_preview(arr, max_size=4)

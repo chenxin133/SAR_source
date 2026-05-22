@@ -24,6 +24,10 @@ const router = createRouter({
       name: 'echo-data',
       redirect: { name: 'raw-data' }
     },
+    {
+      path: '/data/:pathMatch(.*)*',
+      redirect: { name: 'raw-data' }
+    },
     // Satellite routes will be added dynamically or statically here
     {
       path: '/satellite/:id',

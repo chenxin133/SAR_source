@@ -557,7 +557,9 @@ const loadImageToCanvas = async (imageId: string) => {
   canvasLoading.value = true
   try {
     const blob = await imagesRepo.getFile(imageId)
-    if (!blob && !meta.previewUrl) {
+    const sameOriginPreview = `/api/v1/images/${encodeURIComponent(imageId)}/preview`
+    const fallbackPreviewUrl = meta.previewUrl || meta.thumbnailUrl || sameOriginPreview
+    if (!blob && !fallbackPreviewUrl) {
       throw new Error('无法获取影像文件（可能为超大文件且刷新页面后缓存丢失）')
     }
 
@@ -567,8 +569,7 @@ const loadImageToCanvas = async (imageId: string) => {
       img = new FabricImage(c, { selectable: false, evented: false, originX: 'left', originY: 'top', left: 0, top: 0 })
     } else {
       // Use same-origin preview endpoint to avoid canvas taint from cross-origin object URLs.
-      const sameOriginPreview = `/api/v1/images/${encodeURIComponent(imageId)}/preview`
-      const url = blob ? URL.createObjectURL(blob) : (meta.previewUrl ? sameOriginPreview : '')
+      const url = blob ? URL.createObjectURL(blob) : fallbackPreviewUrl
       if (!url) throw new Error('无法加载影像')
       img = await FabricImage.fromURL(url, { crossOrigin: 'anonymous' } as any)
       if (blob && url.startsWith('blob:')) URL.revokeObjectURL(url)

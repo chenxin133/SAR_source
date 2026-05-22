@@ -124,6 +124,24 @@ def _sample_raster_for_preview(arr: np.ndarray, max_size: int) -> np.ndarray:
     raise RuntimeError(f"Unsupported TIFF shape: {arr.shape!r}")
 
 
+def _read_preview_with_pillow(path: str, max_size: int) -> np.ndarray:
+    try:
+        from PIL import Image as PILImage
+    except Exception as e:
+        raise RuntimeError("Pillow not available") from e
+
+    with PILImage.open(path) as img:
+        try:
+            img.draft("RGB", (max_size, max_size))
+        except Exception:
+            pass
+        img.thumbnail((max_size, max_size), resample=PILImage.Resampling.BILINEAR)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        arr = np.asarray(img)
+    return _normalize_raster_shape(arr)
+
+
 def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
     try:
         import tifffile
@@ -135,7 +153,18 @@ def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
     except Exception:
         with tifffile.TiffFile(path) as tif:
             if tif.series:
-                arr = tif.series[0].asarray()
+                series = tif.series[0]
+                levels = list(getattr(series, "levels", None) or [series])
+                arr = None
+                for level in reversed(levels):
+                    try:
+                        arr = level.asarray()
+                        if arr is not None:
+                            break
+                    except Exception:
+                        continue
+                if arr is None:
+                    arr = series.asarray()
             else:
                 arr = tif.asarray()
     if arr is None:
@@ -222,8 +251,11 @@ def _build_preview_rgb(path: str, max_size: int) -> np.ndarray:
         arr = _read_preview_with_gdal(path, max_size=max_size)
         rgb = _to_uint8_rgb(arr)
     except Exception:
-        arr = _read_preview_with_tifffile(path, max_size=max_size)
-        rgb = _to_uint8_rgb(_normalize_raster_shape(arr))
+        try:
+            arr = _read_preview_with_tifffile(path, max_size=max_size)
+            rgb = _to_uint8_rgb(_normalize_raster_shape(arr))
+        except Exception:
+            rgb = _to_uint8_rgb(_read_preview_with_pillow(path, max_size=max_size))
     return _resize_rgb(rgb, max_size=max_size)
 
 
