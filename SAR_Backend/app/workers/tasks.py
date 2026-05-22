@@ -125,16 +125,19 @@ def _read_preview_with_gdal(path: str, max_size: int) -> np.ndarray:
     if ds is None:
         raise RuntimeError("Failed to open raster")
 
-    w = ds.RasterXSize
-    h = ds.RasterYSize
-    ratio = min(max_size / w, max_size / h) if (w > max_size or h > max_size) else 1.0
-    tw = max(1, int(w * ratio))
-    th = max(1, int(h * ratio))
+    try:
+        w = ds.RasterXSize
+        h = ds.RasterYSize
+        ratio = min(max_size / w, max_size / h) if (w > max_size or h > max_size) else 1.0
+        tw = max(1, int(w * ratio))
+        th = max(1, int(h * ratio))
 
-    arr = ds.ReadAsArray(buf_xsize=tw, buf_ysize=th)
-    if arr is None:
-        raise RuntimeError("Failed to read raster")
-    return arr
+        arr = ds.ReadAsArray(buf_xsize=tw, buf_ysize=th)
+        if arr is None:
+            raise RuntimeError("Failed to read raster")
+        return arr
+    finally:
+        ds = None
 
 
 def _sample_raster_for_preview(arr: np.ndarray, max_size: int) -> np.ndarray:
@@ -198,6 +201,17 @@ def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
                     arr = series.asarray()
             else:
                 arr = tif.asarray()
+    else:
+        try:
+            return np.array(_sample_raster_for_preview(arr, max_size=max_size), copy=True)
+        finally:
+            mmap_obj = getattr(arr, "_mmap", None)
+            if mmap_obj is not None:
+                try:
+                    mmap_obj.close()
+                except Exception:
+                    pass
+            del arr
     if arr is None:
         raise RuntimeError("Failed to read TIFF with tifffile")
     return _sample_raster_for_preview(arr, max_size=max_size)
