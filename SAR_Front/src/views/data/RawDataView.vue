@@ -26,8 +26,8 @@
 
     <!-- Data Table -->
     <el-table
+      v-if="filteredImages.length"
       :data="filteredImages"
-      :empty-text="tableEmptyText"
       style="width: 100%"
       border
       v-loading="store.loading"
@@ -61,6 +61,10 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div v-else class="empty-state" v-loading="store.loading">
+      <el-empty :description="tableEmptyText" />
+    </div>
 
     <RawImageUploadDialog v-model="uploadVisible" />
 
@@ -301,6 +305,16 @@ const handleDelete = (row: SarImage) => {
     gap: 12px;
     flex-wrap: wrap;
     margin-bottom: 16px;
+}
+.empty-state {
+    width: 100%;
+    min-height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
 }
 .progress-bar {
     margin-top: 10px;

@@ -17,7 +17,7 @@
       <el-input v-model="sourceFilter" placeholder="筛选来源影像" clearable style="width: 220px" />
     </div>
 
-    <el-table :data="filteredTableData" :empty-text="tableEmptyText" style="width: 100%" border>
+    <el-table v-if="filteredTableData.length" :data="filteredTableData" style="width: 100%" border>
       <el-table-column prop="id" label="样本ID" width="120" />
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="category" label="类别" width="140" />
@@ -33,6 +33,10 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div v-else class="empty-state">
+      <el-empty :description="tableEmptyText" />
+    </div>
 
     <el-dialog v-model="previewVisible" title="样本预览" width="760px" destroy-on-close @closed="clearPreview">
       <el-image v-if="previewUrl" :src="previewUrl" fit="contain" style="width: 100%; height: 420px; background: #111" />
@@ -184,6 +188,17 @@ onMounted(async () => {
     gap: 12px;
     flex-wrap: wrap;
     margin-bottom: 16px;
+}
+
+.empty-state {
+    width: 100%;
+    min-height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border: 1px solid #ebeef5;
+    border-radius: 4px;
 }
 
 .preview-meta {

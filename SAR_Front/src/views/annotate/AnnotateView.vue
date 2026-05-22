@@ -101,11 +101,13 @@
                 <el-input v-model="editRemark" type="textarea" :rows="3" placeholder="输入备注" @change="applyMetaEdit" />
               </el-form-item>
               <el-form-item label="样本">
-                <el-select v-model="sampleFormat" style="width: 120px">
-                  <el-option value="image/png" label="PNG" />
-                  <el-option value="image/jpeg" label="JPG" />
-                </el-select>
-                <el-button type="primary" style="margin-left: 8px" @click="cropSelectedToSample">裁切并保存</el-button>
+                <div class="sample-actions">
+                  <el-select v-model="sampleFormat" style="width: 120px">
+                    <el-option value="image/png" label="PNG" />
+                    <el-option value="image/jpeg" label="JPG" />
+                  </el-select>
+                  <el-button type="primary" @click="cropSelectedToSample">裁切并保存</el-button>
+                </div>
               </el-form-item>
             </el-form>
           </div>
@@ -447,6 +449,7 @@ const buildViewMatrix = () => {
 const applyViewTransform = () => {
   if (!canvas || !bgObject) return
   canvas.setViewportTransform(buildViewMatrix() as any)
+  for (const obj of canvas.getObjects()) obj.setCoords()
   canvas.requestRenderAll()
 }
 
@@ -1715,6 +1718,7 @@ watch(
   width: 360px;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .panel {
@@ -1727,5 +1731,22 @@ watch(
 .panel-title {
   font-weight: 600;
   margin-bottom: 10px;
+}
+
+.sample-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 1200px) {
+  .workspace {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
 }
 </style>
