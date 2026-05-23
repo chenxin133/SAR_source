@@ -9,12 +9,22 @@
 
     <div class="filter-bar">
       <el-input v-model="keyword" placeholder="筛选名称 / 样本ID" clearable style="width: 240px" />
-      <el-input v-model="categoryFilter" placeholder="筛选类别" clearable style="width: 180px" />
+      <el-select v-model="categoryFilter" placeholder="全部类别" clearable style="width: 180px">
+        <el-option v-for="item in categoryOptions" :key="item" :label="item" :value="item" />
+      </el-select>
       <el-select v-model="annotationFilter" placeholder="全部标注类型" clearable style="width: 160px">
         <el-option label="矩形" value="rect" />
         <el-option label="多边形" value="polygon" />
       </el-select>
-      <el-input v-model="sourceFilter" placeholder="筛选来源影像" clearable style="width: 220px" />
+      <el-select v-model="sourceFilter" placeholder="全部来源影像" clearable style="width: 220px">
+        <el-option v-for="item in sourceOptions" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px">
+        <el-option v-for="item in regionOptions" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
+        <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
+      </el-select>
     </div>
 
     <el-table v-if="filteredTableData.length" :data="filteredTableData" style="width: 100%" border>
@@ -55,8 +65,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
+import { imagesRepo } from '../../repositories/imagesRepo'
 import { samplesRepo } from '../../repositories/samplesRepo'
+import type { SarImage } from '../../types/sar'
 import type { SarSample } from '../../types/samples'
+import { unpackImageDescription } from '../../utils/imageMetadata'
 
 const router = useRouter()
 
@@ -65,6 +78,8 @@ type Row = {
   name: string
   category: string
   source: string
+  region: string
+  polarization: string
   annotation: string
   size: string
   time: string
@@ -72,10 +87,31 @@ type Row = {
 }
 
 const samples = ref<SarSample[]>([])
+const images = ref<SarImage[]>([])
 const keyword = ref('')
 const categoryFilter = ref('')
 const annotationFilter = ref('')
 const sourceFilter = ref('')
+const regionFilter = ref('')
+const polarizationFilter = ref('')
+
+const normalizeFilterValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+
+const buildUniqueOptions = (values: Array<string | undefined | null>) => {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? '').trim())
+        .filter((value) => value.length > 0)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+}
+
+const imageMetaById = computed(() => {
+  const map = new Map<string, SarImage>()
+  for (const img of images.value) map.set(img.id, img)
+  return map
+})
 
 const formatTime = (ts: number) => {
   const d = new Date(ts)
@@ -84,37 +120,55 @@ const formatTime = (ts: number) => {
 }
 
 const tableData = computed<Row[]>(() => {
-  return samples.value.map((s) => ({
-    id: s.id,
-    name: s.name,
-    category: s.category || '未分类',
-    source: s.imageName || s.imageId,
-    annotation: `${s.annotationType} / ${s.annotationId}`,
-    size: `${s.width}×${s.height}`,
-    time: formatTime(s.updatedAt || s.createdAt),
-    raw: s
-  }))
+  return samples.value.map((s) => {
+    const imageMeta = imageMetaById.value.get(s.imageId)
+    const parsed = unpackImageDescription(imageMeta?.description)
+    return {
+      id: s.id,
+      name: s.name,
+      category: s.category || '未分类',
+      source: s.imageName || s.imageId,
+      region: parsed.region || '',
+      polarization: String(imageMeta?.polarization || ''),
+      annotation: `${s.annotationType} / ${s.annotationId}`,
+      size: `${s.width}×${s.height}`,
+      time: formatTime(s.updatedAt || s.createdAt),
+      raw: s
+    }
+  })
 })
 
+const categoryOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.category)))
+const sourceOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.source)))
+const regionOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.region)))
+const polarizationOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.polarization)))
+
 const filteredTableData = computed<Row[]>(() => {
-  const keywordValue = keyword.value.trim().toLowerCase()
-  const categoryValue = categoryFilter.value.trim().toLowerCase()
-  const annotationValue = annotationFilter.value.trim().toLowerCase()
-  const sourceValue = sourceFilter.value.trim().toLowerCase()
+  const keywordValue = normalizeFilterValue(keyword.value)
+  const categoryValue = normalizeFilterValue(categoryFilter.value)
+  const annotationValue = normalizeFilterValue(annotationFilter.value)
+  const sourceValue = normalizeFilterValue(sourceFilter.value)
+  const regionValue = normalizeFilterValue(regionFilter.value)
+  const polarizationValue = normalizeFilterValue(polarizationFilter.value)
   return tableData.value.filter((row) => {
     const matchKeyword =
       !keywordValue ||
       row.id.toLowerCase().includes(keywordValue) ||
-      row.name.toLowerCase().includes(keywordValue)
-    const matchCategory = !categoryValue || row.category.toLowerCase().includes(categoryValue)
+      row.name.toLowerCase().includes(keywordValue) ||
+      row.source.toLowerCase().includes(keywordValue) ||
+      row.region.toLowerCase().includes(keywordValue) ||
+      row.polarization.toLowerCase().includes(keywordValue)
+    const matchCategory = !categoryValue || row.category.toLowerCase() === categoryValue
     const matchAnnotation = !annotationValue || row.raw.annotationType.toLowerCase() === annotationValue
-    const matchSource = !sourceValue || row.source.toLowerCase().includes(sourceValue)
-    return matchKeyword && matchCategory && matchAnnotation && matchSource
+    const matchSource = !sourceValue || row.source.toLowerCase() === sourceValue
+    const matchRegion = !regionValue || row.region.toLowerCase() === regionValue
+    const matchPolarization = !polarizationValue || row.polarization.toLowerCase() === polarizationValue
+    return matchKeyword && matchCategory && matchAnnotation && matchSource && matchRegion && matchPolarization
   })
 })
 
 const hasActiveFilters = computed(() => {
-  return [keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value].some(
+  return [keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value, regionFilter.value, polarizationFilter.value].some(
     (value) => String(value || '').trim().length > 0
   )
 })
@@ -149,9 +203,12 @@ const openAnnotate = (row: Row) => {
 
 const reload = async () => {
   try {
-    samples.value = await samplesRepo.list()
+    const [sampleList, imageList] = await Promise.all([samplesRepo.list(), imagesRepo.list().catch(() => [])])
+    samples.value = sampleList
+    images.value = imageList
   } catch (e: any) {
     samples.value = []
+    images.value = []
     ElMessage.error(e?.message ? `样本加载失败：${e.message}` : '样本加载失败')
   }
 }

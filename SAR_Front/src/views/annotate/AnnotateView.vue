@@ -61,11 +61,10 @@
       </div>
 
       <div class="sidebar">
-        <div class="panel">
+        <div class="panel panel-list">
           <div class="panel-title">标注列表</div>
           <el-table
             :data="annotations"
-            height="380"
             style="width: 100%"
             highlight-current-row
             row-key="id"
@@ -87,7 +86,7 @@
           </el-table>
         </div>
 
-        <div class="panel" style="margin-top: 12px">
+        <div class="panel panel-props" style="margin-top: 12px">
           <div class="panel-title">属性</div>
           <div v-if="selectedAnnotation" class="form">
             <el-form label-width="64px" size="default">
@@ -425,25 +424,52 @@ const ROTATE_CURSOR =
 
 const tMatrix = (tx: number, ty: number) => [1, 0, 0, 1, tx, ty] as const
 const sMatrix = (s: number) => [s, 0, 0, s, 0, 0] as const
-const rMatrix = (rad: number) => {
-  const c = Math.cos(rad)
-  const s = Math.sin(rad)
-  return [c, s, -s, c, 0, 0] as const
-}
-
 const mul = (a: any, b: any) => util.multiplyTransformMatrices(a, b)
 
-const buildViewMatrixNoPan = (zoom: number, deg: number) => {
-  const { w, h } = getImageSize()
-  const cx = w / 2
-  const cy = h / 2
-  const rad = (deg * Math.PI) / 180
-  return mul(sMatrix(zoom), mul(tMatrix(cx, cy), mul(rMatrix(rad), tMatrix(-cx, -cy))))
+const getRotationRad = (deg = rotationDeg.value) => (deg * Math.PI) / 180
+
+const rotatePointAround = (p: XY, deg: number, center: XY) => {
+  const rad = getRotationRad(deg)
+  const c = Math.cos(rad)
+  const s = Math.sin(rad)
+  const dx = p.x - center.x
+  const dy = p.y - center.y
+  return {
+    x: center.x + dx * c - dy * s,
+    y: center.y + dx * s + dy * c
+  }
 }
 
+const imagePointToScenePoint = (p: XY, deg = rotationDeg.value) => {
+  const { w, h } = getImageSize()
+  return rotatePointAround(p, deg, { x: w / 2, y: h / 2 })
+}
+
+const scenePointToImagePoint = (p: XY, deg = rotationDeg.value) => {
+  const { w, h } = getImageSize()
+  return rotatePointAround(p, -deg, { x: w / 2, y: h / 2 })
+}
+
+const imagePointsToScenePoints = (pts: XY[], deg = rotationDeg.value) => pts.map((p) => imagePointToScenePoint(p, deg))
+
+const buildViewMatrixNoPan = (zoom: number) => sMatrix(zoom)
+
 const buildViewMatrix = () => {
-  const m0 = buildViewMatrixNoPan(viewZoom.value, rotationDeg.value)
+  const m0 = buildViewMatrixNoPan(viewZoom.value)
   return mul(tMatrix(viewPan.value.x, viewPan.value.y), m0)
+}
+
+const applyBackgroundTransform = () => {
+  if (!bgObject) return
+  const { w, h } = getImageSize()
+  bgObject.set({
+    left: w / 2,
+    top: h / 2,
+    originX: 'center',
+    originY: 'center',
+    angle: rotationDeg.value
+  })
+  bgObject.setCoords()
 }
 
 const applyViewTransform = () => {
@@ -486,13 +512,17 @@ watch(
     const w = canvas.getWidth() || 1
     const h = canvas.getHeight() || 1
     const sc = { x: w / 2, y: h / 2 }
-    const oldM0 = buildViewMatrixNoPan(viewZoom.value, Number.isFinite(prev) ? prev : deg)
-    const oldM = mul(tMatrix(viewPan.value.x, viewPan.value.y), oldM0)
+    const oldM = buildViewMatrix()
     const inv = util.invertTransform(oldM as any)
-    const world = util.transformPoint(new Point(sc.x, sc.y), inv as any)
-    const newM0 = buildViewMatrixNoPan(viewZoom.value, deg)
-    const mapped = util.transformPoint(new Point(world.x, world.y), newM0 as any)
-    viewPan.value = { x: sc.x - mapped.x, y: sc.y - mapped.y }
+    const oldScene = util.transformPoint(new Point(sc.x, sc.y), inv as any)
+    const imagePoint = scenePointToImagePoint(
+      { x: oldScene.x as number, y: oldScene.y as number },
+      Number.isFinite(prev) ? prev : deg
+    )
+    const mappedScene = imagePointToScenePoint(imagePoint, deg)
+    viewPan.value = { x: sc.x - viewZoom.value * mappedScene.x, y: sc.y - viewZoom.value * mappedScene.y }
+    applyBackgroundTransform()
+    renderAnnotations()
     applyViewTransform()
   },
   { flush: 'post' }
@@ -587,6 +617,7 @@ const loadImageToCanvas = async (imageId: string) => {
     clearObjects()
     selectedAnnotationId.value = null
     bgObject = img
+    applyBackgroundTransform()
     canvas.add(img)
     canvas.sendObjectToBack(img)
     fitToScreen()
@@ -606,9 +637,9 @@ const renderAnnotations = () => {
     }
     for (const a of annotations.value) {
       if (a.type === 'rect') {
-        const pts = ((a as any).points as XY[] | undefined) ?? rectToPoints(a.rect)
+        const pts = imagePointsToScenePoints((((a as any).points as XY[] | undefined) ?? rectToPoints(a.rect)).map((p) => ({ x: p.x, y: p.y })))
         const obj = buildRectObjectFromAbs(
-          pts.map((p) => ({ x: p.x, y: p.y })),
+          pts,
           {
             fill: 'rgba(64,158,255,0.18)',
             stroke: '#409EFF',
@@ -620,7 +651,7 @@ const renderAnnotations = () => {
         objectById.set(a.id, obj)
         canvas.add(obj)
       } else {
-        const pts = a.points.map((p) => ({ x: p.x, y: p.y }))
+        const pts = imagePointsToScenePoints(a.points.map((p) => ({ x: p.x, y: p.y })))
         const obj = buildPolygonObjectFromAbs(pts)
         ;(obj as any).annotationId = a.id
         objectById.set(a.id, obj)
@@ -1037,7 +1068,7 @@ const confirmMeta = async () => {
   let ann: SarAnnotation | null = null
   if (pendingType === 'rect') {
     const r = pendingObject as Rect
-    const pts = extractRectAbsPoints(r)
+    const pts = extractRectAbsPoints(r).map((p) => scenePointToImagePoint(p))
     const xs = pts.map((q) => q.x)
     const ys = pts.map((q) => q.y)
     const minX = Math.min(...xs)
@@ -1056,8 +1087,8 @@ const confirmMeta = async () => {
     }
   } else {
     const p = pendingObject as Polygon
-    const pts = extractPolygonAbsPoints(p)
-    const obj = buildPolygonObjectFromAbs(pts)
+    const pts = extractPolygonAbsPoints(p).map((q) => scenePointToImagePoint(q))
+    const obj = buildPolygonObjectFromAbs(imagePointsToScenePoints(pts))
     canvas.remove(p)
     canvas.add(obj)
     pendingObject = obj
@@ -1103,8 +1134,8 @@ let panLast = { x: 0, y: 0 }
 let isSpaceDown = false
 
 let isDrawingRect = false
-let rectStartVp = { x: 0, y: 0 }
-let rectEndVp = { x: 0, y: 0 }
+let rectStartImage = { x: 0, y: 0 }
+let rectEndImage = { x: 0, y: 0 }
 let drawingRect: Rect | null = null
 
 let polyPoints: XY[] = []
@@ -1121,27 +1152,27 @@ const sceneToViewport = (p: XY) => {
 
 const collectSnapTargets = (): Array<{ p: XY; kind: 'start' | 'vertex' }> => {
   const out: Array<{ p: XY; kind: 'start' | 'vertex' }> = []
-  if (polyPoints.length) out.push({ p: polyPoints[0], kind: 'start' })
-  for (const p of polyPoints) out.push({ p, kind: 'vertex' })
+  if (polyPoints.length) out.push({ p: imagePointToScenePoint(polyPoints[0]), kind: 'start' })
+  for (const p of polyPoints) out.push({ p: imagePointToScenePoint(p), kind: 'vertex' })
 
   for (const a of annotations.value) {
     if (a.type === 'polygon') {
-      for (const p of a.points) out.push({ p, kind: 'vertex' })
+      for (const p of a.points) out.push({ p: imagePointToScenePoint(p), kind: 'vertex' })
       continue
     }
     const pts = (a as any).points as XY[] | undefined
     if (pts && pts.length >= 3) {
-      for (const p of pts) out.push({ p, kind: 'vertex' })
+      for (const p of pts) out.push({ p: imagePointToScenePoint(p), kind: 'vertex' })
       continue
     }
     const x = a.rect.x
     const y = a.rect.y
     const w = a.rect.w
     const h = a.rect.h
-    out.push({ p: { x, y }, kind: 'vertex' })
-    out.push({ p: { x: x + w, y }, kind: 'vertex' })
-    out.push({ p: { x: x + w, y: y + h }, kind: 'vertex' })
-    out.push({ p: { x, y: y + h }, kind: 'vertex' })
+    out.push({ p: imagePointToScenePoint({ x, y }), kind: 'vertex' })
+    out.push({ p: imagePointToScenePoint({ x: x + w, y }), kind: 'vertex' })
+    out.push({ p: imagePointToScenePoint({ x: x + w, y: y + h }), kind: 'vertex' })
+    out.push({ p: imagePointToScenePoint({ x, y: y + h }), kind: 'vertex' })
   }
   return out
 }
@@ -1166,7 +1197,7 @@ const setDrawingLinePoints = (cursor?: XY) => {
   if (!canvas || !drawingLine) return
   if (!polyPoints.length) return
   const abs = cursor ? [...polyPoints, cursor] : [...polyPoints]
-  const pts = abs.length === 1 ? [abs[0], abs[0]] : abs
+  const pts = imagePointsToScenePoints(abs.length === 1 ? [abs[0], abs[0]] : abs)
   drawingLine.set({ points: pts.map((p) => ({ x: p.x, y: p.y })) as any })
   drawingLine.setBoundingBox(true)
   drawingLine.setCoords()
@@ -1179,7 +1210,7 @@ const finishPolygonDrawing = () => {
   canvas.remove(drawingLine)
   drawingLine = null
   polyPoints = []
-  const poly = buildPolygonObjectFromAbs(raw)
+  const poly = buildPolygonObjectFromAbs(imagePointsToScenePoints(raw))
   canvas.add(poly)
   canvas.requestRenderAll()
   openMeta(poly, 'polygon')
@@ -1283,7 +1314,7 @@ const syncObjectToModel = (obj: Rect | Polygon) => {
 
   if (annotations.value[idx]?.type === 'rect' && obj.type === 'rect') {
     const r = obj as Rect
-    const pts = extractRectAbsPoints(r)
+    const pts = extractRectAbsPoints(r).map((p) => scenePointToImagePoint(p))
     const xs = pts.map((q) => q.x)
     const ys = pts.map((q) => q.y)
     const minX = Math.min(...xs)
@@ -1303,7 +1334,7 @@ const syncObjectToModel = (obj: Rect | Polygon) => {
 
   if (annotations.value[idx]?.type === 'polygon' && obj.type === 'polygon') {
     const p = obj as Polygon
-    const pts = extractPolygonAbsPoints(p)
+    const pts = extractPolygonAbsPoints(p).map((q) => scenePointToImagePoint(q))
     const next = cloneAnnotations(annotations.value)
     next[idx] = { ...(next[idx] as any), updatedAt: now, points: pts }
     applyAnnotations(next, true)
@@ -1323,7 +1354,7 @@ const bindCanvasEvents = () => {
     const inv = util.invertTransform(oldM as any)
     const world = util.transformPoint(new Point(vp.x, vp.y), inv as any)
     viewZoom.value = nextZoom
-    const newM0 = buildViewMatrixNoPan(nextZoom, rotationDeg.value)
+    const newM0 = buildViewMatrixNoPan(nextZoom)
     const mapped = util.transformPoint(new Point(world.x, world.y), newM0 as any)
     viewPan.value = { x: vp.x - mapped.x, y: vp.y - mapped.y }
     applyViewTransform()
@@ -1343,17 +1374,16 @@ const bindCanvasEvents = () => {
     if (!currentImageId.value || !bgObject) return
     if (tool.value === 'rect') {
       isDrawingRect = true
-      rectStartVp = getViewportPoint(e)
-      rectEndVp = { ...rectStartVp }
-      const inv = util.invertTransform(buildViewMatrix() as any)
-      const p0 = util.transformPoint(new Point(rectStartVp.x, rectStartVp.y), inv as any)
+      const p0Scene = getScenePoint(e)
+      rectStartImage = scenePointToImagePoint(p0Scene)
+      rectEndImage = { ...rectStartImage }
       const abs = [
-        { x: p0.x, y: p0.y },
-        { x: p0.x, y: p0.y },
-        { x: p0.x, y: p0.y },
-        { x: p0.x, y: p0.y }
+        { x: rectStartImage.x, y: rectStartImage.y },
+        { x: rectStartImage.x, y: rectStartImage.y },
+        { x: rectStartImage.x, y: rectStartImage.y },
+        { x: rectStartImage.x, y: rectStartImage.y }
       ]
-      drawingRect = buildRectObjectFromAbs(abs, {
+      drawingRect = buildRectObjectFromAbs(imagePointsToScenePoints(abs), {
         fill: 'rgba(64,158,255,0.18)',
         stroke: '#409EFF',
         strokeWidth: 2,
@@ -1370,9 +1400,9 @@ const bindCanvasEvents = () => {
     }
     if (tool.value === 'polygon') {
       const mouseVp = getViewportPoint(e)
-      const raw = getScenePoint(e)
-      const s = snapScenePoint(raw, mouseVp)
-      const p = s.p
+      const rawScene = getScenePoint(e)
+      const s = snapScenePoint(rawScene, mouseVp)
+      const p = scenePointToImagePoint(s.p)
       if (drawingLine && e.detail >= 2) {
         finishPolygonDrawing()
         return
@@ -1417,31 +1447,26 @@ const bindCanvasEvents = () => {
       return
     }
     if (tool.value === 'rect' && isDrawingRect && drawingRect) {
-      rectEndVp = getViewportPoint(e)
-      const x0 = Math.min(rectStartVp.x, rectEndVp.x)
-      const y0 = Math.min(rectStartVp.y, rectEndVp.y)
-      const x1 = Math.max(rectStartVp.x, rectEndVp.x)
-      const y1 = Math.max(rectStartVp.y, rectEndVp.y)
-      const inv = util.invertTransform(buildViewMatrix() as any)
-      const p00 = util.transformPoint(new Point(x0, y0), inv as any)
-      const p10 = util.transformPoint(new Point(x1, y0), inv as any)
-      const p11 = util.transformPoint(new Point(x1, y1), inv as any)
-      const p01 = util.transformPoint(new Point(x0, y1), inv as any)
+      rectEndImage = scenePointToImagePoint(getScenePoint(e))
+      const x0 = Math.min(rectStartImage.x, rectEndImage.x)
+      const y0 = Math.min(rectStartImage.y, rectEndImage.y)
+      const x1 = Math.max(rectStartImage.x, rectEndImage.x)
+      const y1 = Math.max(rectStartImage.y, rectEndImage.y)
       const abs = [
-        { x: p00.x, y: p00.y },
-        { x: p10.x, y: p10.y },
-        { x: p11.x, y: p11.y },
-        { x: p01.x, y: p01.y }
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 }
       ]
-      setRectAbsPoints(drawingRect, abs)
+      setRectAbsPoints(drawingRect, imagePointsToScenePoints(abs))
       canvas.requestRenderAll()
       return
     }
     if (tool.value === 'polygon' && drawingLine && polyPoints.length) {
       const mouseVp = getViewportPoint(e)
-      const raw = getScenePoint(e)
-      const s = snapScenePoint(raw, mouseVp)
-      const p = s.p
+      const rawScene = getScenePoint(e)
+      const s = snapScenePoint(rawScene, mouseVp)
+      const p = scenePointToImagePoint(s.p)
       setDrawingLinePoints({ x: p.x, y: p.y })
       canvas.requestRenderAll()
     }
@@ -1458,8 +1483,8 @@ const bindCanvasEvents = () => {
       const r = drawingRect
       isDrawingRect = false
       drawingRect = null
-      const vw = Math.abs(rectEndVp.x - rectStartVp.x)
-      const vh = Math.abs(rectEndVp.y - rectStartVp.y)
+      const vw = Math.abs(rectEndImage.x - rectStartImage.x)
+      const vh = Math.abs(rectEndImage.y - rectStartImage.y)
       if (vw < 3 || vh < 3) {
         canvas.remove(r)
         canvas.requestRenderAll()
@@ -1699,6 +1724,7 @@ watch(
   overflow: hidden;
   gap: 12px;
   padding-top: 12px;
+  min-height: 0;
 }
 
 .canvas-wrap {
@@ -1728,6 +1754,9 @@ watch(
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .panel {
@@ -1735,6 +1764,17 @@ watch(
   border: 1px solid #dcdfe6;
   border-radius: 6px;
   padding: 10px;
+  flex-shrink: 0;
+}
+
+.panel-list {
+  flex: 0 1 auto;
+}
+
+.panel-props {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .panel-title {

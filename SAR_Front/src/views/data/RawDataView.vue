@@ -19,9 +19,15 @@
         <el-option label="已就绪" value="ready" />
         <el-option label="失败" value="failed" />
       </el-select>
-      <el-input v-model="satelliteFilter" placeholder="筛选卫星源" clearable style="width: 180px" />
-      <el-input v-model="regionFilter" placeholder="筛选地区/备注" clearable style="width: 180px" />
-      <el-input v-model="polarizationFilter" placeholder="筛选极化方式" clearable style="width: 180px" />
+      <el-select v-model="satelliteFilter" placeholder="全部卫星源" clearable style="width: 180px">
+        <el-option v-for="item in satelliteOptions" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px">
+        <el-option v-for="item in regionOptions" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
+        <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
+      </el-select>
     </div>
 
     <!-- Data Table -->
@@ -96,6 +102,7 @@
                 <span v-else>无预览图</span>
             </el-descriptions-item>
             <el-descriptions-item v-if="!isBackendMode" label="卫星源">{{ selectedImage.satellite }}</el-descriptions-item>
+            <el-descriptions-item label="地区">{{ getImageRegion(selectedImage) || '无' }}</el-descriptions-item>
             <el-descriptions-item label="采集时间">{{ selectedImage.acquisitionDate }}</el-descriptions-item>
             <el-descriptions-item label="文件大小">{{ selectedImage.fileSize }}</el-descriptions-item>
             <el-descriptions-item v-if="!isBackendMode" label="分辨率">{{ selectedImage.resolution || '-' }}</el-descriptions-item>
@@ -114,7 +121,7 @@
                     show-icon
                 />
             </el-descriptions-item>
-            <el-descriptions-item v-if="!isBackendMode" label="备注">{{ selectedImage.description || '无' }}</el-descriptions-item>
+            <el-descriptions-item label="备注">{{ getImageRemark(selectedImage) || '无' }}</el-descriptions-item>
         </el-descriptions>
         <template #footer>
             <el-button type="primary" plain @click="handlePreview(selectedImage!)" v-if="selectedImage?.previewUrl || selectedImage?.thumbnailUrl">
@@ -144,6 +151,7 @@ import ImageViewer from '../../components/ImageViewer.vue'
 import RawImageUploadDialog from '../../components/raw/RawImageUploadDialog.vue'
 import { getStorageMode } from '../../config/storage'
 import { exportLocalDataPackage } from '../../utils/migrationExport'
+import { unpackImageDescription } from '../../utils/imageMetadata'
 
 const store = useRawDataStore()
 const router = useRouter()
@@ -154,33 +162,55 @@ const satelliteFilter = ref('')
 const regionFilter = ref('')
 const polarizationFilter = ref('')
 
+const normalizeFilterValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+
+const buildUniqueOptions = (values: Array<string | undefined | null>) => {
+    return Array.from(
+        new Set(
+            values
+                .map((value) => String(value || '').trim())
+                .filter((value) => value.length > 0)
+        )
+    ).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+}
+
+const satelliteOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.satellite)))
+const regionOptions = computed(() => buildUniqueOptions(store.images.map((img) => unpackImageDescription(img.description).region)))
+const polarizationOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.polarization)))
+
+const getImageRegion = (img?: SarImage | null) => unpackImageDescription(img?.description).region
+const getImageRemark = (img?: SarImage | null) => unpackImageDescription(img?.description).remark
+
 onMounted(() => {
     store.fetchImages()
 })
 
 const filteredImages = computed(() => {
-    const keywordValue = keyword.value.trim().toLowerCase()
-    const statusValue = statusFilter.value.trim().toLowerCase()
-    const satelliteValue = satelliteFilter.value.trim().toLowerCase()
-    const regionValue = regionFilter.value.trim().toLowerCase()
-    const polarizationValue = polarizationFilter.value.trim().toLowerCase()
+    const keywordValue = normalizeFilterValue(keyword.value)
+    const statusValue = normalizeFilterValue(statusFilter.value)
+    const satelliteValue = normalizeFilterValue(satelliteFilter.value)
+    const regionValue = normalizeFilterValue(regionFilter.value)
+    const polarizationValue = normalizeFilterValue(polarizationFilter.value)
+
     return store.images.filter((img) => {
         const nameValue = String(img.name || '').toLowerCase()
-        const descriptionValue = String(img.description || '').toLowerCase()
+        const descriptionValue = getImageRemark(img).toLowerCase()
+        const regionText = getImageRegion(img).toLowerCase()
         const satelliteText = String(img.satellite || '').toLowerCase()
         const polarizationText = String(img.polarization || '').toLowerCase()
         const matchKeyword =
             !keywordValue ||
             img.id.toLowerCase().includes(keywordValue) ||
-            nameValue.includes(keywordValue)
+            nameValue.includes(keywordValue) ||
+            descriptionValue.includes(keywordValue) ||
+            regionText.includes(keywordValue)
         const matchStatus = !statusValue || String(img.status || '').toLowerCase() === statusValue
-        const matchSatellite = !satelliteValue || satelliteText.includes(satelliteValue)
-        const matchRegion = !regionValue || descriptionValue.includes(regionValue)
-        const matchPolarization = !polarizationValue || polarizationText.includes(polarizationValue)
+        const matchSatellite = !satelliteValue || satelliteText === satelliteValue
+        const matchRegion = !regionValue || regionText === regionValue
+        const matchPolarization = !polarizationValue || polarizationText === polarizationValue
         return matchKeyword && matchStatus && matchSatellite && matchRegion && matchPolarization
     })
 })
-
 const hasActiveFilters = computed(() => {
     return [
         keyword.value,

@@ -29,6 +29,10 @@
         <el-input v-model="form.resolution" placeholder="例如: 1m" />
       </el-form-item>
 
+      <el-form-item label="地区" prop="region">
+        <el-input v-model="form.region" placeholder="例如: 海南 / 青岛 / 南海" />
+      </el-form-item>
+
       <el-form-item label="极化方式" prop="polarization">
         <el-select v-model="form.polarization" placeholder="选择极化方式" style="width: 100%">
           <el-option label="HH" value="HH" />
@@ -48,6 +52,7 @@
           :on-remove="handleFileRemove"
           :on-exceed="handleExceed"
           :file-list="fileList"
+          :show-file-list="false"
         >
           <el-button type="primary">选择文件</el-button>
           <template #tip>
@@ -56,6 +61,10 @@
             </div>
           </template>
         </el-upload>
+        <div v-if="fileList.length" class="selected-file">
+          <span class="selected-file__name" :title="fileList[0].name">{{ fileList[0].name }}</span>
+          <el-button class="selected-file__remove" link @click="clearSelectedFile">移除</el-button>
+        </div>
       </el-form-item>
 
       <el-form-item label="备注">
@@ -96,10 +105,12 @@ import {
   normalizeSatelliteName,
   saveCustomSatelliteNames
 } from '../../constants/satellites'
+import { packImageDescription, unpackImageDescription } from '../../utils/imageMetadata'
 
 type RawImageUploadForm = {
   name: string
   satellite: string
+  region: string
   resolution: string
   polarization: string
   description: string
@@ -140,6 +151,7 @@ const fileList = ref<UploadUserFile[]>([])
 const form = reactive<RawImageUploadForm>({
   name: '',
   satellite: props.satellitePreset ?? '',
+  region: '',
   resolution: '',
   polarization: '',
   description: '',
@@ -148,7 +160,9 @@ const form = reactive<RawImageUploadForm>({
 
 const rules = {
   name: [{ required: true, message: '请输入影像名称', trigger: 'blur' }],
-  satellite: [{ required: true, message: '请选择卫星源', trigger: 'change' }]
+  satellite: [{ required: true, message: '请选择卫星源', trigger: 'change' }],
+  region: [{ required: true, message: '请输入地区', trigger: 'blur' }],
+  polarization: [{ required: true, message: '请选择极化方式', trigger: 'change' }]
 } as const
 
 const builtinSatelliteNames = computed(() => entrySatellites.map((s) => s.name))
@@ -203,6 +217,7 @@ const clearSelectedFile = () => {
 
 const resetForm = (keepSatellitePreset: boolean) => {
   form.name = ''
+  form.region = ''
   form.resolution = ''
   form.polarization = ''
   form.description = ''
@@ -232,6 +247,9 @@ const handleFileChange = (uploadFile: UploadFile, uploadFiles: UploadFiles) => {
   }
   form.file = raw
   if (!form.name) form.name = uploadFile.name
+  const parsed = unpackImageDescription(form.description)
+  if (!form.region && parsed.region) form.region = parsed.region
+  if (!form.description && parsed.remark) form.description = parsed.remark
 }
 
 const handleFileRemove = () => {
@@ -264,7 +282,7 @@ const submitUpload = async () => {
     name: form.name,
     satellite,
     file: form.file,
-    description: form.description,
+    description: packImageDescription(form.region, form.description),
     resolution: form.resolution,
     polarization: form.polarization
   })
@@ -285,5 +303,35 @@ const handleClosed = () => {
 .progress-bar {
   margin-top: 10px;
 }
-</style>
 
+.selected-file {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #f5f7fa;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.selected-file__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #606266;
+}
+
+.selected-file__remove {
+  flex-shrink: 0;
+}
+
+:deep(.el-upload) {
+  max-width: 100%;
+}
+</style>
