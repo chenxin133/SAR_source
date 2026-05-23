@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Callable, TypeVar
 
 from app.config import get_settings
@@ -9,8 +10,31 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 class InlineCeleryApp:
     def task(self, *args: Any, **kwargs: Any) -> Callable[[F], F]:
+        bind = bool(kwargs.get("bind"))
+
         def decorator(func: F) -> F:
-            return func
+            if not bind:
+                return func
+
+            class InlineBoundTask:
+                name = kwargs.get("name") or getattr(func, "__name__", "inline_task")
+
+                def __init__(self) -> None:
+                    self.request = SimpleNamespace(retries=0)
+
+                def retry(self, exc: Exception | None = None, countdown: int | None = None, max_retries: int | None = None):
+                    self.request.retries += 1
+                    if exc is not None:
+                        raise exc
+                    raise RuntimeError("Inline task retry requested without exception")
+
+                def run(self, *run_args: Any, **run_kwargs: Any):
+                    return func(self, *run_args, **run_kwargs)
+
+                def __call__(self, *call_args: Any, **call_kwargs: Any):
+                    return self.run(*call_args, **call_kwargs)
+
+            return InlineBoundTask()  # type: ignore[return-value]
 
         return decorator
 
