@@ -1,12 +1,30 @@
 from __future__ import annotations
 
-from celery import Celery
+from typing import Any, Callable, TypeVar
 
 from app.config import get_settings
 
+F = TypeVar("F", bound=Callable[..., Any])
 
-def create_celery() -> Celery:
+
+class InlineCeleryApp:
+    def task(self, *args: Any, **kwargs: Any) -> Callable[[F], F]:
+        def decorator(func: F) -> F:
+            return func
+
+        return decorator
+
+    def send_task(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Celery is disabled when TASK_EXECUTION_MODE=inline")
+
+
+def create_celery() -> Any:
     settings = get_settings()
+    if settings.task_execution_mode.strip().lower() == "inline":
+        return InlineCeleryApp()
+
+    from celery import Celery
+
     app = Celery("sar", broker=settings.redis_url, backend=settings.redis_url, include=["app.workers.tasks"])
     app.conf.update(
         task_acks_late=True,
@@ -20,4 +38,3 @@ def create_celery() -> Celery:
 
 
 celery_app = create_celery()
-
