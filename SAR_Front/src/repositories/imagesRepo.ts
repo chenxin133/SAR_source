@@ -165,19 +165,9 @@ export const imagesRepo = {
     if (mode === 'local') return await rawImagesRepo.list()
 
     const rows = await imagesApi.list({ limit: 200, offset: 0 })
-    // 列表补齐缩略图 URL：按需并发拉取，失败不影响列表渲染
-    const thumbsById = new Map<string, ApiThumbnailOut[]>()
-    await Promise.all(
-      rows.map(async (img) => {
-        try {
-          const thumbs = await imagesApi.getThumbnails(String(img.id))
-          thumbsById.set(String(img.id), thumbs)
-        } catch {
-          // ignore
-        }
-      })
-    )
-    return rows.map((img) => mapApiImageToSarImage(img, thumbsById.get(String(img.id))))
+    // 首屏列表只返回基础元数据，避免首次进入页面时被 N 次缩略图请求拖慢交互。
+    // 已就绪影像会优先使用同源 preview URL，详情/预览再按需获取更多缩略图信息。
+    return rows.map((img) => mapApiImageToSarImage(img))
   },
 
   async create(payload: UploadPayload, onProgress?: (percent: number) => void): Promise<SarImage> {

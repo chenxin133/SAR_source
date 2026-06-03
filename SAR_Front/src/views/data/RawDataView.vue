@@ -54,16 +54,18 @@
           <span v-else>-</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="300" fixed="right">
+      <el-table-column label="操作" width="320" fixed="right">
         <template #default="scope">
-          <el-button size="small" type="primary" plain @click="handlePreview(scope.row)">
-            <el-icon><Picture /></el-icon> 预览
-          </el-button>
-          <el-button size="small" type="success" plain @click="handleAnnotate(scope.row)">
-            <el-icon><Edit /></el-icon> 标注
-          </el-button>
-          <el-button size="small" @click="handleView(scope.row)">查看详情</el-button>
-          <el-button size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
+          <div class="table-actions">
+            <el-button class="table-actions__button" size="small" type="primary" plain @click="handlePreview(scope.row)">
+              <el-icon><Picture /></el-icon> 预览
+            </el-button>
+            <el-button class="table-actions__button" size="small" type="success" plain @click="handleAnnotate(scope.row)">
+              <el-icon><Edit /></el-icon> 标注
+            </el-button>
+            <el-button class="table-actions__button" size="small" @click="handleView(scope.row)">查看详情</el-button>
+            <el-button class="table-actions__button" size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -358,5 +360,17 @@ const handleDelete = (row: SarImage) => {
     color: #f56c6c;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+.table-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.table-actions__button {
+    width: calc(50% - 4px);
+    margin: 0;
+    justify-content: center;
 }
 </style>

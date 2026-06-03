@@ -18,6 +18,7 @@ def _set_defaults(base: Path) -> None:
     os.environ.setdefault("DATABASE_URL", f"sqlite:///{(base / 'data' / 'sar.db').as_posix()}")
     os.environ.setdefault("TASK_EXECUTION_MODE", "inline")
     os.environ.setdefault("STORAGE_BACKEND", "local")
+    os.environ.setdefault("RATE_LIMIT_REQUESTS", "0")
     os.environ.setdefault("LOCAL_STORAGE_DIR", str(base / "data" / "storage"))
     os.environ.setdefault("LOCAL_DATA_DIR", str(base / "data"))
     os.environ.setdefault("S3_BUCKET", "sar")

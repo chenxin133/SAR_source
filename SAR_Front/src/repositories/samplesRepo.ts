@@ -8,8 +8,16 @@ type SampleRecord = {
 }
 
 const store = new IdbStore<SampleRecord>('SarSystemDB', 'samples', 4)
+const SAMPLES_CHANGED_EVENT = 'sar-samples-changed'
+
+const emitSamplesChanged = () => {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(SAMPLES_CHANGED_EVENT))
+}
 
 export const samplesRepo = {
+  changedEventName: SAMPLES_CHANGED_EVENT,
+
   async list(): Promise<SarSample[]> {
     const records = await store.getAll()
     records.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -28,10 +36,12 @@ export const samplesRepo = {
       updatedAt: Date.now()
     }
     await store.put(record)
+    emitSamplesChanged()
   },
 
   async delete(id: string): Promise<void> {
     await store.delete(id)
+    emitSamplesChanged()
   },
 
   async exportAllRecords(): Promise<SampleRecord[]> {

@@ -142,6 +142,10 @@ const reload = async (opts?: { openHighlight?: boolean }) => {
   }
 }
 
+const handleSamplesChanged = () => {
+  void reload()
+}
+
 const categoryOptions = computed(() => {
   const set = new Set<string>()
   for (const s of samples.value) if (s.category) set.add(s.category)
@@ -292,6 +296,7 @@ const deleteSample = (sample: SarSample) => {
 }
 
 onMounted(async () => {
+  window.addEventListener(samplesRepo.changedEventName, handleSamplesChanged)
   await reload({ openHighlight: true })
 })
 
@@ -310,6 +315,7 @@ watch(
 )
 
 onUnmounted(() => {
+  window.removeEventListener(samplesRepo.changedEventName, handleSamplesChanged)
   clearPreview()
   for (const url of thumbUrlById.values()) URL.revokeObjectURL(url)
   thumbUrlById.clear()

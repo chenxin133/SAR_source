@@ -24,6 +24,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
+        if settings.env.strip().lower() == "standalone":
+            return await call_next(request)
         if settings.rate_limit_requests <= 0:
             return await call_next(request)
 
@@ -71,4 +73,3 @@ class JsonLogMiddleware(BaseHTTPMiddleware):
                 "duration_ms": duration_ms,
             }
             print(json.dumps(entry, ensure_ascii=False))
-
