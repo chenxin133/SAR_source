@@ -66,6 +66,7 @@ export const uploadRawImage = (payload: UploadPayload, onProgress?: (percent: nu
     form.append('name', payload.name)
     form.append('satellite', payload.satellite)
     if (payload.resolution) form.append('resolution', payload.resolution)
+    if (payload.frequencyBand) form.append('frequency_band', payload.frequencyBand)
     if (payload.polarization) form.append('polarization', payload.polarization)
     if (payload.description) form.append('description', payload.description)
 

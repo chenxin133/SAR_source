@@ -237,6 +237,7 @@ export const rawImagesRepo = {
       acquisitionDate: new Date().toISOString().replace('T', ' ').substring(0, 19),
       fileSize: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
       resolution: payload.resolution || '',
+      frequencyBand: payload.frequencyBand || '',
       polarization: payload.polarization || '',
       status: 'Ready',
       description: payload.description || ''

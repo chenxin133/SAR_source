@@ -50,6 +50,7 @@ class Image(Base):
     satellite: Mapped[str | None] = mapped_column(Text)
     acquisition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution: Mapped[str | None] = mapped_column(Text)
+    frequency_band: Mapped[str | None] = mapped_column(Text)
     polarization: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")

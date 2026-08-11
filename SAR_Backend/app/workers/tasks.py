@@ -466,6 +466,7 @@ def import_package(self: CeleryTask, task_id: str, project_id: str, storage_key:
                     satellite = meta.get("satellite")
                     acquisition_at = meta.get("acquisition_at") or meta.get("acquisitionDate")
                     resolution = meta.get("resolution")
+                    frequency_band = meta.get("frequency_band") or meta.get("frequencyBand")
                     polarization = meta.get("polarization")
                     description = meta.get("description")
 
@@ -493,6 +494,7 @@ def import_package(self: CeleryTask, task_id: str, project_id: str, storage_key:
                         satellite=str(satellite) if satellite is not None else None,
                         acquisition_at=_parse_datetime(acquisition_at),
                         resolution=str(resolution) if resolution is not None else None,
+                        frequency_band=str(frequency_band) if frequency_band is not None else None,
                         polarization=str(polarization) if polarization is not None else None,
                         description=str(description) if description is not None else None,
                         size_bytes=size_bytes,

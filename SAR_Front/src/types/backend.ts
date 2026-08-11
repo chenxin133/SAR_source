@@ -15,6 +15,7 @@ export type ApiImageOut = {
   satellite?: string | null
   acquisition_at?: string | null
   resolution?: string | null
+  frequency_band?: string | null
   polarization?: string | null
   description?: string | null
   width?: number | null

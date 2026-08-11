@@ -56,6 +56,7 @@
             <el-descriptions-item label="采集时间">{{ selectedImage.acquisitionDate }}</el-descriptions-item>
             <el-descriptions-item label="文件大小">{{ selectedImage.fileSize }}</el-descriptions-item>
             <el-descriptions-item label="分辨率">{{ selectedImage.resolution || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="数据频段">{{ selectedImage.frequencyBand || '-' }}</el-descriptions-item>
             <el-descriptions-item label="极化方式">{{ selectedImage.polarization || '-' }}</el-descriptions-item>
             <el-descriptions-item label="状态">
               <el-tag size="small">{{ selectedImage.status }}</el-tag>

@@ -38,6 +38,7 @@ const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): Sa
     acquisitionDate: String((img as any).acquisition_at ?? img.created_at ?? ''),
     fileSize: formatBytes(Number(img.size_bytes ?? 0)),
     resolution: String(img.resolution ?? ''),
+    frequencyBand: String(img.frequency_band ?? ''),
     polarization: String(img.polarization ?? ''),
     status: img.status,
     description: String(img.description ?? ''),
@@ -203,6 +204,7 @@ export const imagesRepo = {
       satellite: payload.satellite || undefined,
       acquisition_at: new Date().toISOString(),
       resolution: payload.resolution || undefined,
+      frequency_band: payload.frequencyBand || undefined,
       polarization: payload.polarization || undefined,
       description: payload.description || undefined
     })

@@ -14,6 +14,7 @@ class ImageOut(BaseModel):
     satellite: str | None = None
     acquisition_at: datetime | None = None
     resolution: str | None = None
+    frequency_band: str | None = None
     polarization: str | None = None
     description: str | None = None
     width: int | None = None
@@ -57,6 +58,7 @@ class UploadCompleteRequest(BaseModel):
     satellite: str | None = None
     acquisition_at: datetime | None = None
     resolution: str | None = None
+    frequency_band: str | None = None
     polarization: str | None = None
     description: str | None = None
 

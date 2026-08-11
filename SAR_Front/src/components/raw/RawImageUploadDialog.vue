@@ -29,6 +29,15 @@
         <el-input v-model="form.resolution" placeholder="例如: 1m" />
       </el-form-item>
 
+      <el-form-item label="数据频段" prop="frequencyBand">
+        <el-select v-model="form.frequencyBand" placeholder="选择数据频段" style="width: 100%">
+          <el-option label="Ka" value="Ka" />
+          <el-option label="Ku" value="Ku" />
+          <el-option label="X" value="X" />
+          <el-option label="C" value="C" />
+        </el-select>
+      </el-form-item>
+
       <el-form-item label="地区" prop="region">
         <el-input v-model="form.region" placeholder="例如: 海南 / 青岛 / 南海" />
       </el-form-item>
@@ -112,6 +121,7 @@ type RawImageUploadForm = {
   satellite: string
   region: string
   resolution: string
+  frequencyBand: string
   polarization: string
   description: string
   file: File | null
@@ -153,6 +163,7 @@ const form = reactive<RawImageUploadForm>({
   satellite: props.satellitePreset ?? '',
   region: '',
   resolution: '',
+  frequencyBand: '',
   polarization: '',
   description: '',
   file: null
@@ -162,6 +173,7 @@ const rules = {
   name: [{ required: true, message: '请输入影像名称', trigger: 'blur' }],
   satellite: [{ required: true, message: '请选择卫星源', trigger: 'change' }],
   region: [{ required: true, message: '请输入地区', trigger: 'blur' }],
+  frequencyBand: [{ required: true, message: '请选择数据频段', trigger: 'change' }],
   polarization: [{ required: true, message: '请选择极化方式', trigger: 'change' }]
 } as const
 
@@ -219,6 +231,7 @@ const resetForm = (keepSatellitePreset: boolean) => {
   form.name = ''
   form.region = ''
   form.resolution = ''
+  form.frequencyBand = ''
   form.polarization = ''
   form.description = ''
   form.file = null
@@ -284,6 +297,7 @@ const submitUpload = async () => {
     file: form.file,
     description: packImageDescription(form.region, form.description),
     resolution: form.resolution,
+    frequencyBand: form.frequencyBand,
     polarization: form.polarization
   })
 

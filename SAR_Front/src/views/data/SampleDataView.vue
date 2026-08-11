@@ -25,6 +25,9 @@
       <el-select v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px">
         <el-option v-for="item in regionOptions" :key="item" :label="item" :value="item" />
       </el-select>
+      <el-select v-model="frequencyBandFilter" placeholder="全部数据频段" clearable style="width: 180px">
+        <el-option v-for="item in frequencyBandOptions" :key="item" :label="item" :value="item" />
+      </el-select>
       <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
         <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
       </el-select>
@@ -133,6 +136,7 @@ type Row = {
   category: string
   source: string
   region: string
+  frequencyBand: string
   polarization: string
   annotation: string
   size: string
@@ -147,6 +151,7 @@ const categoryFilter = ref('')
 const annotationFilter = ref('')
 const sourceFilter = ref('')
 const regionFilter = ref('')
+const frequencyBandFilter = ref('')
 const polarizationFilter = ref('')
 
 const normalizeFilterValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
@@ -186,6 +191,7 @@ const tableData = computed<Row[]>(() => {
       category: s.category || '未分类',
       source: isLocalSample(s) ? '本地上传' : s.imageName || s.imageId,
       region: parsed.region || '',
+      frequencyBand: String(imageMeta?.frequencyBand || ''),
       polarization: String(imageMeta?.polarization || ''),
       annotation: isLocalSample(s) ? '本地上传 / 无关联标注' : `${s.annotationType} / ${s.annotationId}`,
       size: `${s.width}×${s.height}`,
@@ -198,6 +204,7 @@ const tableData = computed<Row[]>(() => {
 const categoryOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.category)))
 const sourceOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.source)))
 const regionOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.region)))
+const frequencyBandOptions = ['Ka', 'Ku', 'X', 'C']
 const polarizationOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.polarization)))
 
 const filteredTableData = computed<Row[]>(() => {
@@ -206,6 +213,7 @@ const filteredTableData = computed<Row[]>(() => {
   const annotationValue = normalizeFilterValue(annotationFilter.value)
   const sourceValue = normalizeFilterValue(sourceFilter.value)
   const regionValue = normalizeFilterValue(regionFilter.value)
+  const frequencyBandValue = normalizeFilterValue(frequencyBandFilter.value)
   const polarizationValue = normalizeFilterValue(polarizationFilter.value)
   return tableData.value.filter((row) => {
     const matchKeyword =
@@ -214,18 +222,20 @@ const filteredTableData = computed<Row[]>(() => {
       row.name.toLowerCase().includes(keywordValue) ||
       row.source.toLowerCase().includes(keywordValue) ||
       row.region.toLowerCase().includes(keywordValue) ||
+      row.frequencyBand.toLowerCase().includes(keywordValue) ||
       row.polarization.toLowerCase().includes(keywordValue)
     const matchCategory = !categoryValue || row.category.toLowerCase() === categoryValue
     const matchAnnotation = !annotationValue || row.raw.annotationType.toLowerCase() === annotationValue
     const matchSource = !sourceValue || row.source.toLowerCase() === sourceValue
     const matchRegion = !regionValue || row.region.toLowerCase() === regionValue
+    const matchFrequencyBand = !frequencyBandValue || row.frequencyBand.toLowerCase() === frequencyBandValue
     const matchPolarization = !polarizationValue || row.polarization.toLowerCase() === polarizationValue
-    return matchKeyword && matchCategory && matchAnnotation && matchSource && matchRegion && matchPolarization
+    return matchKeyword && matchCategory && matchAnnotation && matchSource && matchRegion && matchFrequencyBand && matchPolarization
   })
 })
 
 const hasActiveFilters = computed(() => {
-  return [keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value, regionFilter.value, polarizationFilter.value].some(
+  return [keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value, regionFilter.value, frequencyBandFilter.value, polarizationFilter.value].some(
     (value) => String(value || '').trim().length > 0
   )
 })

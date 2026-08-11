@@ -25,6 +25,9 @@
       <el-select v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px">
         <el-option v-for="item in regionOptions" :key="item" :label="item" :value="item" />
       </el-select>
+      <el-select v-model="frequencyBandFilter" placeholder="全部数据频段" clearable style="width: 180px">
+        <el-option v-for="item in frequencyBandOptions" :key="item" :label="item" :value="item" />
+      </el-select>
       <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
         <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
       </el-select>
@@ -108,6 +111,7 @@
             <el-descriptions-item label="采集时间">{{ selectedImage.acquisitionDate }}</el-descriptions-item>
             <el-descriptions-item label="文件大小">{{ selectedImage.fileSize }}</el-descriptions-item>
             <el-descriptions-item v-if="!isBackendMode" label="分辨率">{{ selectedImage.resolution || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="数据频段">{{ selectedImage.frequencyBand || '-' }}</el-descriptions-item>
             <el-descriptions-item v-if="!isBackendMode" label="极化方式">{{ selectedImage.polarization || '-' }}</el-descriptions-item>
             <el-descriptions-item label="状态">
                 <el-tag size="small">{{ selectedImage.status }}</el-tag>
@@ -162,6 +166,7 @@ const keyword = ref('')
 const statusFilter = ref('')
 const satelliteFilter = ref('')
 const regionFilter = ref('')
+const frequencyBandFilter = ref('')
 const polarizationFilter = ref('')
 
 const normalizeFilterValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
@@ -178,6 +183,7 @@ const buildUniqueOptions = (values: Array<string | undefined | null>) => {
 
 const satelliteOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.satellite)))
 const regionOptions = computed(() => buildUniqueOptions(store.images.map((img) => unpackImageDescription(img.description).region)))
+const frequencyBandOptions = ['Ka', 'Ku', 'X', 'C']
 const polarizationOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.polarization)))
 
 const getImageRegion = (img?: SarImage | null) => unpackImageDescription(img?.description).region
@@ -192,6 +198,7 @@ const filteredImages = computed(() => {
     const statusValue = normalizeFilterValue(statusFilter.value)
     const satelliteValue = normalizeFilterValue(satelliteFilter.value)
     const regionValue = normalizeFilterValue(regionFilter.value)
+    const frequencyBandValue = normalizeFilterValue(frequencyBandFilter.value)
     const polarizationValue = normalizeFilterValue(polarizationFilter.value)
 
     return store.images.filter((img) => {
@@ -199,6 +206,7 @@ const filteredImages = computed(() => {
         const descriptionValue = getImageRemark(img).toLowerCase()
         const regionText = getImageRegion(img).toLowerCase()
         const satelliteText = String(img.satellite || '').toLowerCase()
+        const frequencyBandText = String(img.frequencyBand || '').toLowerCase()
         const polarizationText = String(img.polarization || '').toLowerCase()
         const matchKeyword =
             !keywordValue ||
@@ -209,8 +217,9 @@ const filteredImages = computed(() => {
         const matchStatus = !statusValue || String(img.status || '').toLowerCase() === statusValue
         const matchSatellite = !satelliteValue || satelliteText === satelliteValue
         const matchRegion = !regionValue || regionText === regionValue
+        const matchFrequencyBand = !frequencyBandValue || frequencyBandText === frequencyBandValue
         const matchPolarization = !polarizationValue || polarizationText === polarizationValue
-        return matchKeyword && matchStatus && matchSatellite && matchRegion && matchPolarization
+        return matchKeyword && matchStatus && matchSatellite && matchRegion && matchFrequencyBand && matchPolarization
     })
 })
 const hasActiveFilters = computed(() => {
@@ -219,6 +228,7 @@ const hasActiveFilters = computed(() => {
         statusFilter.value,
         satelliteFilter.value,
         regionFilter.value,
+        frequencyBandFilter.value,
         polarizationFilter.value,
     ].some((value) => String(value || '').trim().length > 0)
 })

@@ -5,6 +5,7 @@ export interface SarImage {
   acquisitionDate: string; // ISO String
   fileSize: string;
   resolution?: string;
+  frequencyBand?: string; // Ka, Ku, X, C
   polarization?: string; // HH, HV, VH, VV
   status: string; // 'Uploading' | 'Processing' | 'Ready' | 'Error';
   description?: string;
@@ -21,6 +22,7 @@ export interface UploadPayload {
   satellite: string;
   file: File;
   description?: string;
+  frequencyBand?: string;
   polarization?: string;
   resolution?: string;
 }

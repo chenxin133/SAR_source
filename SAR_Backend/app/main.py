@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 
 from app.api.router import api_router
 from app.config import get_settings
@@ -55,6 +55,10 @@ def create_app() -> FastAPI:
             db = SessionLocal()
             try:
                 Base.metadata.create_all(bind=db.get_bind())
+                image_columns = {column["name"] for column in inspect(db.get_bind()).get_columns("images")}
+                if "frequency_band" not in image_columns:
+                    db.execute(text("ALTER TABLE images ADD COLUMN frequency_band TEXT"))
+                    db.commit()
             finally:
                 db.close()
         ensure_bucket_exists(settings.s3_bucket)

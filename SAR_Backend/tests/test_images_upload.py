@@ -15,7 +15,7 @@ def test_chunk_upload_flow(client, monkeypatch):
 
     done = client.post(
         f"/api/v1/images/upload/{upload_id}/complete",
-        json={"total_parts": 2, "name": "a.tif", "mime_type": "image/tiff"},
+        json={"total_parts": 2, "name": "a.tif", "mime_type": "image/tiff", "frequency_band": "X"},
     )
     assert done.status_code == 200
     image_id = done.json()["data"]["image_id"]
@@ -23,4 +23,5 @@ def test_chunk_upload_flow(client, monkeypatch):
 
     lst = client.get("/api/v1/images")
     assert lst.status_code == 200
-    assert any(str(x["id"]) == image_id for x in lst.json()["data"])
+    uploaded = next(x for x in lst.json()["data"] if str(x["id"]) == image_id)
+    assert uploaded["frequency_band"] == "X"

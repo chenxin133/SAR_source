@@ -62,6 +62,7 @@ export const imagesApi = {
     satellite?: string
     acquisition_at?: string
     resolution?: string
+    frequency_band?: string
     polarization?: string
     description?: string
   }): Promise<ApiUploadCompleteResponse> {
@@ -76,6 +77,7 @@ export const imagesApi = {
           satellite: payload.satellite,
           acquisition_at: payload.acquisition_at,
           resolution: payload.resolution,
+          frequency_band: payload.frequency_band,
           polarization: payload.polarization,
           description: payload.description
         })
