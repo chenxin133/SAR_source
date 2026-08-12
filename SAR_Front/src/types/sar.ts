@@ -6,7 +6,7 @@ export interface SarImage {
   fileSize: string;
   resolution?: string;
   frequencyBand?: string; // Ka, Ku, X, C
-  polarization?: string; // HH, HV, VH, VV
+  polarization?: string; // Single, dual, or quad polarization combination
   status: string; // 'Uploading' | 'Processing' | 'Ready' | 'Error';
   description?: string;
   thumbnailUrl?: string; // Mock URL
@@ -21,6 +21,7 @@ export interface UploadPayload {
   name: string;
   satellite: string;
   file: File;
+  acquisitionAt?: string;
   description?: string;
   frequencyBand?: string;
   polarization?: string;

@@ -4,6 +4,18 @@
       <h2>样本数据管理</h2>
       <div class="header-buttons">
         <el-button type="primary" plain @click="uploadVisible = true">本地上传样本</el-button>
+        <el-dropdown @command="handleBatchExport">
+          <el-button :loading="isBatchExporting">
+            批量导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="origin">原格式</el-dropdown-item>
+              <el-dropdown-item command="image/png">PNG</el-dropdown-item>
+              <el-dropdown-item command="image/jpeg">JPEG</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button type="primary" @click="reload">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
@@ -41,10 +53,20 @@
       <el-table-column prop="annotation" label="标注" width="220" />
       <el-table-column prop="size" label="尺寸" width="110" />
       <el-table-column prop="time" label="时间" width="160" />
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="scope">
           <el-button size="small" type="primary" plain @click="openPreview(scope.row)">预览</el-button>
           <el-button size="small" type="success" plain :disabled="!canOpenAnnotate(scope.row.raw)" @click="openAnnotate(scope.row)">标注</el-button>
+          <el-dropdown trigger="click" @command="(cmd: unknown) => handleExportOne(scope.row.raw, cmd)">
+            <el-button size="small" plain>导出<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="origin">原格式</el-dropdown-item>
+                <el-dropdown-item command="image/png">PNG</el-dropdown-item>
+                <el-dropdown-item command="image/jpeg">JPEG</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-button size="small" type="danger" plain @click="deleteSample(scope.row)">删除</el-button>
         </template>
       </el-table-column>
@@ -69,6 +91,17 @@
       <el-form ref="uploadFormRef" :model="uploadForm" :rules="uploadRules" label-width="90px">
         <el-form-item label="样本名称" prop="name">
           <el-input v-model="uploadForm.name" placeholder="请输入样本名称" />
+        </el-form-item>
+        <el-form-item label="来源影像" prop="imageId">
+          <el-select v-model="uploadForm.imageId" filterable placeholder="选择来源影像" style="width: 100%">
+            <el-option v-for="image in images" :key="image.id" :label="`${image.name} (${image.id})`" :value="image.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标注类型" prop="annotationType">
+          <el-select v-model="uploadForm.annotationType" style="width: 100%">
+            <el-option label="矩形" value="rect" />
+            <el-option label="多边形" value="polygon" />
+          </el-select>
         </el-form-item>
         <el-form-item label="类别" prop="category">
           <el-input v-model="uploadForm.category" placeholder="请输入类别" />
@@ -114,17 +147,21 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile, type UploadFiles, type UploadInstance, type UploadUserFile } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { imagesRepo } from '../../repositories/imagesRepo'
 import { samplesRepo } from '../../repositories/samplesRepo'
 import type { SarImage } from '../../types/sar'
 import type { SarSample } from '../../types/samples'
 import { unpackImageDescription } from '../../utils/imageMetadata'
+import { buildPolarizationOptions } from '../../constants/polarizations'
 
 const router = useRouter()
+const route = useRoute()
 
 type SampleUploadForm = {
   name: string
+  imageId: string
+  annotationType: 'rect' | 'polygon'
   category: string
   remark: string
   file: File | null
@@ -145,6 +182,7 @@ type Row = {
 }
 
 const samples = ref<SarSample[]>([])
+const isBatchExporting = ref(false)
 const images = ref<SarImage[]>([])
 const keyword = ref('')
 const categoryFilter = ref('')
@@ -173,7 +211,7 @@ const imageMetaById = computed(() => {
 })
 
 const isLocalSample = (sample: SarSample) => sample.imageId.startsWith('local-upload:')
-const canOpenAnnotate = (sample: SarSample) => !isLocalSample(sample)
+const canOpenAnnotate = (sample: SarSample) => !isLocalSample(sample) && imageMetaById.value.has(sample.imageId)
 
 const formatTime = (ts: number) => {
   const d = new Date(ts)
@@ -205,7 +243,7 @@ const categoryOptions = computed(() => buildUniqueOptions(tableData.value.map((r
 const sourceOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.source)))
 const regionOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.region)))
 const frequencyBandOptions = ['Ka', 'Ku', 'X', 'C']
-const polarizationOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.polarization)))
+const polarizationOptions = computed(() => buildPolarizationOptions(tableData.value.map((row) => row.polarization)))
 
 const filteredTableData = computed<Row[]>(() => {
   const keywordValue = normalizeFilterValue(keyword.value)
@@ -266,10 +304,64 @@ const openAnnotate = (row: Row) => {
     ElMessage.info('本地上传样本未关联原始影像，暂不支持跳转标注页')
     return
   }
-  router.push({
-    name: 'annotate',
-    query: { imageId: row.raw.imageId, annotationId: row.raw.annotationId }
+  const query: Record<string, string> = { imageId: row.raw.imageId }
+  if (row.raw.annotationId && !row.raw.annotationId.startsWith('manual:')) query.annotationId = row.raw.annotationId
+  router.push({ name: 'annotate', query })
+}
+
+type ExportCommand = 'origin' | 'image/png' | 'image/jpeg'
+const sanitizeFileName = (name: string) => name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'sample'
+const extFromType = (type: SarSample['format']) => (type === 'image/png' ? 'png' : 'jpg')
+const triggerDownload = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500)
+}
+const transcodeImageBlob = async (blob: Blob, target: SarSample['format']) => {
+  if (blob.type === target) return blob
+  const bmp = await createImageBitmap(blob)
+  const canvas = document.createElement('canvas')
+  canvas.width = bmp.width
+  canvas.height = bmp.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建导出画布')
+  if (target === 'image/jpeg') {
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+  }
+  ctx.drawImage(bmp, 0, 0)
+  bmp.close()
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((out) => (out ? resolve(out) : reject(new Error('导出失败'))), target, target === 'image/jpeg' ? 0.92 : undefined)
   })
+}
+const exportOne = async (sample: SarSample, command: ExportCommand) => {
+  const type = command === 'origin' ? sample.format : command
+  const blob = command === 'origin' ? sample.image : await transcodeImageBlob(sample.image, type)
+  triggerDownload(blob, `${sanitizeFileName(sample.name)}_${sample.id}.${extFromType(type)}`)
+}
+const handleExportOne = async (sample: SarSample, command: unknown) => {
+  try {
+    await exportOne(sample, command as ExportCommand)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '导出失败')
+  }
+}
+const handleBatchExport = async (command: unknown) => {
+  if (!filteredTableData.value.length || isBatchExporting.value) return
+  isBatchExporting.value = true
+  try {
+    for (const row of filteredTableData.value) {
+      await exportOne(row.raw, command as ExportCommand)
+      await new Promise((resolve) => setTimeout(resolve, 80))
+    }
+    ElMessage.success(`已开始导出 ${filteredTableData.value.length} 个样本`)
+  } finally {
+    isBatchExporting.value = false
+  }
 }
 
 const reload = async () => {
@@ -277,6 +369,14 @@ const reload = async () => {
     const [sampleList, imageList] = await Promise.all([samplesRepo.list(), imagesRepo.list().catch(() => [])])
     samples.value = sampleList
     images.value = imageList
+    const highlightId = typeof route.query.highlight === 'string' ? route.query.highlight : ''
+    if (highlightId) {
+      const sample = sampleList.find((item) => item.id === highlightId)
+      if (sample) openPreview({ raw: sample } as Row)
+      const query = { ...route.query }
+      delete query.highlight
+      void router.replace({ query })
+    }
   } catch (e: any) {
     samples.value = []
     images.value = []
@@ -295,6 +395,8 @@ const uploadRef = ref<UploadInstance>()
 const uploadFileList = ref<UploadUserFile[]>([])
 const uploadForm = reactive<SampleUploadForm>({
   name: '',
+  imageId: '',
+  annotationType: 'rect',
   category: '',
   remark: '',
   file: null
@@ -302,6 +404,8 @@ const uploadForm = reactive<SampleUploadForm>({
 
 const uploadRules = {
   name: [{ required: true, message: '请输入样本名称', trigger: 'blur' }],
+  imageId: [{ required: true, message: '请选择来源影像', trigger: 'change' }],
+  annotationType: [{ required: true, message: '请选择标注类型', trigger: 'change' }],
   category: [{ required: true, message: '请输入类别', trigger: 'blur' }]
 } as const
 
@@ -309,6 +413,8 @@ const allowedUploadExts = new Set(['png', 'jpg', 'jpeg', 'webp'])
 
 const resetUploadForm = () => {
   uploadForm.name = ''
+  uploadForm.imageId = ''
+  uploadForm.annotationType = 'rect'
   uploadForm.category = ''
   uploadForm.remark = ''
   uploadForm.file = null
@@ -390,13 +496,14 @@ const buildLocalSamplePayload = async (file: File) => {
   const thumbnail = await canvasToBlob(downscaleCanvas(canvas, 256), 'image/png')
   const now = Date.now()
   const id = `sample-${now}-${Math.random().toString(36).slice(2, 8)}`
+  const sourceImage = imageMetaById.value.get(uploadForm.imageId)
   return {
     id,
     name: uploadForm.name.trim(),
-    imageId: `local-upload:${id}`,
-    imageName: '本地上传',
-    annotationId: `local:${id}`,
-    annotationType: 'rect' as const,
+    imageId: uploadForm.imageId,
+    imageName: sourceImage?.name || uploadForm.imageId,
+    annotationId: `manual:${id}`,
+    annotationType: uploadForm.annotationType,
     category: uploadForm.category.trim(),
     remark: uploadForm.remark.trim(),
     format,
@@ -446,11 +553,13 @@ const deleteSample = (row: Row) => {
 
 onMounted(async () => {
   window.addEventListener(samplesRepo.changedEventName, handleSamplesChanged)
+  window.addEventListener('focus', handleSamplesChanged)
   await reload()
 })
 
 onUnmounted(() => {
   window.removeEventListener(samplesRepo.changedEventName, handleSamplesChanged)
+  window.removeEventListener('focus', handleSamplesChanged)
 })
 </script>
 

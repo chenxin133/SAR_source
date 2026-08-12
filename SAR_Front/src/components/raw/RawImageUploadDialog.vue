@@ -25,6 +25,16 @@
         </el-select>
       </el-form-item>
 
+      <el-form-item label="采集时间" prop="acquisitionAt">
+        <el-date-picker
+          v-model="form.acquisitionAt"
+          type="datetime"
+          value-format="YYYY-MM-DDTHH:mm:ss"
+          placeholder="选择影像实际采集时间"
+          style="width: 100%"
+        />
+      </el-form-item>
+
       <el-form-item label="分辨率" prop="resolution">
         <el-input v-model="form.resolution" placeholder="例如: 1m" />
       </el-form-item>
@@ -44,10 +54,7 @@
 
       <el-form-item label="极化方式" prop="polarization">
         <el-select v-model="form.polarization" placeholder="选择极化方式" style="width: 100%">
-          <el-option label="HH" value="HH" />
-          <el-option label="HV" value="HV" />
-          <el-option label="VH" value="VH" />
-          <el-option label="VV" value="VV" />
+          <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
         </el-select>
       </el-form-item>
 
@@ -114,11 +121,13 @@ import {
   normalizeSatelliteName,
   saveCustomSatelliteNames
 } from '../../constants/satellites'
+import { buildPolarizationOptions } from '../../constants/polarizations'
 import { packImageDescription, unpackImageDescription } from '../../utils/imageMetadata'
 
 type RawImageUploadForm = {
   name: string
   satellite: string
+  acquisitionAt: string
   region: string
   resolution: string
   frequencyBand: string
@@ -161,6 +170,7 @@ const fileList = ref<UploadUserFile[]>([])
 const form = reactive<RawImageUploadForm>({
   name: '',
   satellite: props.satellitePreset ?? '',
+  acquisitionAt: '',
   region: '',
   resolution: '',
   frequencyBand: '',
@@ -184,6 +194,7 @@ const satelliteOptions = computed(() => {
   const fromImages = store.images.map((img) => img.satellite)
   return dedupeSatelliteNames([...builtinSatelliteNames.value, ...customSatelliteNames.value, ...fromImages])
 })
+const polarizationOptions = computed(() => buildPolarizationOptions(store.images.map((img) => img.polarization)))
 
 watch(
   () => visibleProxy.value,
@@ -229,6 +240,7 @@ const clearSelectedFile = () => {
 
 const resetForm = (keepSatellitePreset: boolean) => {
   form.name = ''
+  form.acquisitionAt = ''
   form.region = ''
   form.resolution = ''
   form.frequencyBand = ''
@@ -295,6 +307,7 @@ const submitUpload = async () => {
     name: form.name,
     satellite,
     file: form.file,
+    acquisitionAt: form.acquisitionAt || undefined,
     description: packImageDescription(form.region, form.description),
     resolution: form.resolution,
     frequencyBand: form.frequencyBand,

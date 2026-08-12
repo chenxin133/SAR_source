@@ -38,11 +38,7 @@ const router = createRouter({
       name: 'satellite-entry',
       component: () => import('../views/satellite/SatelliteEntryView.vue')
     },
-    {
-      path: '/samples/manage',
-      name: 'sample-manage',
-      component: () => import('../views/samples/SampleManageView.vue')
-    },
+    { path: '/samples/manage', redirect: { name: 'sample-data' } },
     {
       path: '/annotate',
       name: 'annotate',

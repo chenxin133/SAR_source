@@ -10,8 +10,7 @@
       title="本模块用于将当前卫星的 SAR 原始影像上传入库；卫星源字段会自动带入。"
     />
 
-    <el-tabs v-model="activeTab" class="entry-tabs">
-      <el-tab-pane label="原始影像" name="raw">
+    <div class="entry-content">
         <el-card class="box-card">
           <template #header>
             <div class="card-header">
@@ -22,11 +21,16 @@
             </div>
           </template>
 
-          <el-table :data="satelliteImages" style="width: 100%" border v-loading="store.loading">
-            <el-table-column prop="id" label="ID" width="120" />
-            <el-table-column prop="name" label="影像名称" min-width="200" />
-            <el-table-column prop="acquisitionDate" label="采集时间" width="180" />
-            <el-table-column prop="fileSize" label="大小" width="120" />
+          <el-table :data="satelliteImages" style="width: 100%" border v-loading="store.loading" table-layout="fixed">
+            <el-table-column prop="id" label="ID" width="230" show-overflow-tooltip />
+            <el-table-column prop="name" label="影像名称" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="acquisitionDate" label="采集时间" width="180">
+              <template #default="scope">{{ scope.row.acquisitionDate || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="frequencyBand" label="频段" width="90" />
+            <el-table-column prop="polarization" label="极化" width="90" />
+            <el-table-column prop="resolution" label="分辨率" width="100" />
+            <el-table-column prop="fileSize" label="大小" width="110" />
             <el-table-column prop="status" label="状态" width="100">
               <template #default="scope">
                 <el-tag :type="scope.row.status === 'Ready' ? 'success' : 'info'">{{ scope.row.status }}</el-tag>
@@ -77,79 +81,13 @@
           :blob="previewBlob"
           :title="previewTitle"
         />
-      </el-tab-pane>
-
-      <el-tab-pane label="参数表单（可选）" name="meta">
-        <el-card class="box-card">
-          <template #header>
-            <div class="card-header">
-              <span>数据录入表单</span>
-              <el-button class="button" type="primary" @click="handleSubmit">提交数据</el-button>
-            </div>
-          </template>
-          <el-form :model="form" label-width="120px">
-            <el-form-item label="卫星名称">
-              <el-input :model-value="satelliteName" disabled />
-            </el-form-item>
-
-            <el-form-item label="采集时间">
-              <el-date-picker v-model="form.date" type="datetime" placeholder="选择日期时间" style="width: 100%" />
-            </el-form-item>
-
-            <el-row>
-              <el-col :span="12">
-                <el-form-item label="轨道号">
-                  <el-input v-model="form.orbitNumber" placeholder="例如: 12345" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="侧视方向">
-                  <el-select v-model="form.lookDirection" placeholder="选择方向" style="width: 100%">
-                    <el-option label="左侧视" value="Left" />
-                    <el-option label="右侧视" value="Right" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
-
-            <el-form-item label="极化方式">
-              <el-checkbox-group v-model="form.polarization">
-                <el-checkbox label="HH" value="HH" />
-                <el-checkbox label="HV" value="HV" />
-                <el-checkbox label="VH" value="VH" />
-                <el-checkbox label="VV" value="VV" />
-              </el-checkbox-group>
-            </el-form-item>
-
-            <el-form-item label="成像模式">
-              <el-select v-model="form.imagingMode" placeholder="选择成像模式">
-                <el-option label="条带模式 (Stripmap)" value="Stripmap" />
-                <el-option label="聚束模式 (Spotlight)" value="Spotlight" />
-                <el-option label="扫描模式 (ScanSAR)" value="ScanSAR" />
-                <el-option label="宽幅模式 (Wide)" value="Wide" />
-              </el-select>
-            </el-form-item>
-
-            <div v-if="satelliteId === 'luojia-1-01'">
-              <el-divider content-position="left">珞珈一号01星特定参数</el-divider>
-              <el-form-item label="夜光等级">
-                <el-slider v-model="form.nightLightLevel" />
-              </el-form-item>
-            </div>
-
-            <el-form-item label="备注">
-              <el-input v-model="form.remarks" type="textarea" />
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-tab-pane>
-    </el-tabs>
+    </div>
     
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getSatelliteNameById } from '../../constants/satellites'
@@ -162,36 +100,6 @@ const route = useRoute()
 const satelliteId = computed(() => route.params.id as string)
 
 const satelliteName = computed(() => getSatelliteNameById(satelliteId.value))
-
-const activeTab = ref<'raw' | 'meta'>('raw')
-
-const form = reactive<{
-    date: string
-    orbitNumber: string
-    lookDirection: string
-    polarization: string[]
-    imagingMode: string
-    remarks: string
-    nightLightLevel: number
-}>({
-    date: '',
-    orbitNumber: '',
-    lookDirection: '',
-    polarization: [],
-    imagingMode: '',
-    remarks: '',
-    nightLightLevel: 0
-})
-
-watch(satelliteId, () => {
-    form.date = ''
-    form.orbitNumber = ''
-    form.lookDirection = ''
-    form.polarization = []
-    form.imagingMode = ''
-    form.remarks = ''
-    form.nightLightLevel = 0
-})
 
 // --- Raw images ---
 const store = useRawDataStore()
@@ -273,16 +181,11 @@ const handleDelete = (row: SarImage) => {
     })
 }
 
-const handleSubmit = () => {
-    console.log('Submitting data for', satelliteName.value, form)
-    ElMessage.success(`成功录入 ${satelliteName.value} 数据`)
-}
 </script>
 
 <style scoped>
 .box-card {
-    max-width: 800px;
-    margin: 0 auto;
+    width: 100%;
 }
 .card-header {
     display: flex;
@@ -290,11 +193,11 @@ const handleSubmit = () => {
     align-items: center;
 }
 .entry-tip {
-  max-width: 800px;
-  margin: 0 auto 12px auto;
+  width: 100%;
+  margin-bottom: 12px;
 }
-.entry-tabs {
-  max-width: 800px;
-  margin: 0 auto;
+.entry-content {
+  width: 100%;
+  min-width: 0;
 }
 </style>

@@ -662,22 +662,44 @@ const renderAnnotations = () => {
       const obj = objectById.get(selectedAnnotationId.value)
       if (obj) canvas.setActiveObject(obj)
     }
+    updateAnnotationHighlight()
     canvas.requestRenderAll()
   } finally {
     isApplying = false
   }
 }
 
-const removeAnnotation = (id: string) => {
+const removeAnnotation = async (id: string) => {
   const next = annotations.value.filter((a) => a.id !== id)
   applyAnnotations(next, true)
   if (selectedAnnotationId.value === id) selectedAnnotationId.value = null
+  if (currentImageId.value) {
+    await samplesRepo.deleteByAnnotation(currentImageId.value, id).catch(() => undefined)
+  }
+}
+
+const updateAnnotationHighlight = () => {
+  if (!canvas) return
+  for (const [id, obj] of objectById) {
+    const active = id === selectedAnnotationId.value
+    const polygon = obj.type === 'polygon'
+    obj.set({
+      stroke: active ? '#F56C6C' : polygon ? '#67C23A' : '#409EFF',
+      strokeWidth: active ? 4 : 2,
+      fill: active
+        ? 'rgba(245,108,108,0.24)'
+        : polygon
+          ? 'rgba(103,194,58,0.15)'
+          : 'rgba(64,158,255,0.18)'
+    })
+  }
 }
 
 const selectAnnotation = (id: string | null) => {
   selectedAnnotationId.value = id
   setRouteAnnotationId(id)
   if (!canvas) return
+  updateAnnotationHighlight()
   if (!id) {
     canvas.discardActiveObject()
     canvas.requestRenderAll()
@@ -772,7 +794,7 @@ const buildPolygonObjectFromAbs = (
       strokeWidth: 2,
       transparentCorners: false,
       cornerColor: '#67C23A',
-      lockRotation: true,
+      lockRotation: false,
       objectCaching: false,
       ...(opts || {})
     }
@@ -1004,7 +1026,8 @@ const cropSelectedToSample = async () => {
     return
   }
   try {
-    await samplesRepo.put(sample)
+    const savedSample = await samplesRepo.put(sample)
+    sample.id = savedSample.id
   } catch (e: any) {
     ElMessage.error(e?.message ? `保存样本失败：${e.message}` : '保存样本失败')
     return
@@ -1016,7 +1039,7 @@ const cropSelectedToSample = async () => {
     type: 'success'
   })
     .then(() => {
-      router.push({ name: 'sample-manage', query: { highlight: sample.id } })
+      router.push({ name: 'sample-data', query: { highlight: sample.id } })
     })
     .catch(() => undefined)
 }
@@ -1203,9 +1226,14 @@ const setDrawingLinePoints = (cursor?: XY) => {
   drawingLine.setCoords()
 }
 
-const finishPolygonDrawing = () => {
+const finishPolygonDrawing = (discardDoubleClickPoint = false) => {
   if (!canvas || tool.value !== 'polygon' || !drawingLine) return
-  const raw = [...polyPoints]
+  const sourcePoints = discardDoubleClickPoint ? polyPoints.slice(0, -1) : polyPoints
+  const raw = sourcePoints.filter((point, index, points) => {
+    if (index === 0) return true
+    const previous = points[index - 1]
+    return Math.hypot(point.x - previous.x, point.y - previous.y) >= 2
+  })
   if (raw.length < 3) return
   canvas.remove(drawingLine)
   drawingLine = null
@@ -1237,7 +1265,7 @@ const deleteSelected = () => {
   const obj = canvas.getActiveObject() as any
   const id = obj?.annotationId as string | undefined
   if (!id) return
-  removeAnnotation(id)
+  void removeAnnotation(id)
   canvas.discardActiveObject()
   canvas.requestRenderAll()
 }
@@ -1404,7 +1432,7 @@ const bindCanvasEvents = () => {
       const s = snapScenePoint(rawScene, mouseVp)
       const p = scenePointToImagePoint(s.p)
       if (drawingLine && e.detail >= 2) {
-        finishPolygonDrawing()
+        finishPolygonDrawing(true)
         return
       }
       if (drawingLine && s.kind === 'start' && polyPoints.length >= 3) {
@@ -1496,7 +1524,7 @@ const bindCanvasEvents = () => {
   })
 
   canvas.on('mouse:dblclick', () => {
-    finishPolygonDrawing()
+    finishPolygonDrawing(true)
   })
 
   canvas.on('selection:created', (e) => {
@@ -1514,6 +1542,8 @@ const bindCanvasEvents = () => {
   canvas.on('selection:cleared', () => {
     if (isApplying) return
     selectedAnnotationId.value = null
+    updateAnnotationHighlight()
+    canvas?.requestRenderAll()
   })
 
   canvas.on('object:modified', (e) => {
@@ -1558,11 +1588,11 @@ const saveToLocal = async () => {
   if (!currentImageId.value) return
   await annotationsRepo.put(buildPayload())
   if (!autoGenerateSamplesOnSave.value) {
-    ElMessage.success('已保存到本地')
+    ElMessage.success('标注已保存')
     return
   }
   if (!annotations.value.length) {
-    ElMessage.success('已保存到本地（当前无标注，未生成样本）')
+    ElMessage.success('标注已保存（当前无标注，未生成样本）')
     return
   }
   if (!bgObject) {
@@ -1571,7 +1601,7 @@ const saveToLocal = async () => {
   }
   try {
     const n = await autoGenerateSamplesForCurrentImage()
-    ElMessage.success(`已保存到本地，并自动生成 ${n} 个样本`)
+    ElMessage.success(`标注已保存，并自动生成 ${n} 个样本`)
   } catch (e: any) {
     ElMessage.warning(e?.message ? `标注已保存，但自动生成样本失败：${e.message}` : '标注已保存，但自动生成样本失败')
   }
@@ -1639,6 +1669,7 @@ onMounted(async () => {
   applyRouteAnnotation()
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
+  window.addEventListener('focus', refreshCurrentImageFromBackend)
 })
 
 onUnmounted(() => {
@@ -1649,7 +1680,14 @@ onUnmounted(() => {
   cleanupCanvas()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('keyup', onKeyup)
+  window.removeEventListener('focus', refreshCurrentImageFromBackend)
 })
+
+async function refreshCurrentImageFromBackend() {
+  if (!currentImageId.value || metaDialogVisible.value || isDrawingRect || drawingLine) return
+  const saved = await annotationsRepo.get(currentImageId.value).catch(() => undefined)
+  if (saved?.annotations) applyAnnotations(cloneAnnotations(saved.annotations), false)
+}
 
 watch(
   () => route.query.imageId,
@@ -1658,6 +1696,7 @@ watch(
     if (!id || id === currentImageId.value) return
     currentImageId.value = id
     await loadForImage(id)
+    applyRouteAnnotation()
   }
 )
 

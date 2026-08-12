@@ -158,6 +158,7 @@ import RawImageUploadDialog from '../../components/raw/RawImageUploadDialog.vue'
 import { getStorageMode } from '../../config/storage'
 import { exportLocalDataPackage } from '../../utils/migrationExport'
 import { unpackImageDescription } from '../../utils/imageMetadata'
+import { buildPolarizationOptions } from '../../constants/polarizations'
 
 const store = useRawDataStore()
 const router = useRouter()
@@ -184,7 +185,7 @@ const buildUniqueOptions = (values: Array<string | undefined | null>) => {
 const satelliteOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.satellite)))
 const regionOptions = computed(() => buildUniqueOptions(store.images.map((img) => unpackImageDescription(img.description).region)))
 const frequencyBandOptions = ['Ka', 'Ku', 'X', 'C']
-const polarizationOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.polarization)))
+const polarizationOptions = computed(() => buildPolarizationOptions(store.images.map((img) => img.polarization)))
 
 const getImageRegion = (img?: SarImage | null) => unpackImageDescription(img?.description).region
 const getImageRemark = (img?: SarImage | null) => unpackImageDescription(img?.description).remark

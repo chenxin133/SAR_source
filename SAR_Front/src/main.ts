@@ -11,7 +11,6 @@ const preloadRouteChunks = () => {
   const preload = () => {
     void import('./views/data/RawDataView.vue')
     void import('./views/data/SampleDataView.vue')
-    void import('./views/samples/SampleManageView.vue')
     void import('./views/satellite/SatelliteEntryView.vue')
     void import('./views/annotate/AnnotateView.vue')
   }

@@ -25,6 +25,7 @@ class SampleOut(BaseModel):
     roi: dict | None = None
     crop_storage_key: str | None = None
     thumb_storage_key: str | None = None
+    image_url: str | None = None
+    thumbnail_url: str | None = None
     created_at: datetime
     updated_at: datetime
-

@@ -1,13 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterView } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { entrySatellites } from './constants/satellites'
+
+const route = useRoute()
+const activeMenu = computed(() => route.path)
 </script>
 
 <template>
   <el-container class="layout-container">
     <el-aside width="200px">
       <el-menu
-        default-active="1"
+        :default-active="activeMenu"
         class="el-menu-vertical-demo"
         router
       >
@@ -38,11 +43,6 @@ import { entrySatellites } from './constants/satellites'
             {{ s.name }}
           </el-menu-item>
         </el-sub-menu>
-
-        <el-menu-item index="/samples/manage">
-          <el-icon><Grid /></el-icon>
-          <span>样本管理</span>
-        </el-menu-item>
 
         <el-menu-item index="/annotate">
           <el-icon><Edit /></el-icon>
