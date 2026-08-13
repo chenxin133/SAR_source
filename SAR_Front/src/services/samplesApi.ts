@@ -36,7 +36,7 @@ const mapSample = async (row: ApiSample): Promise<SarSample> => {
     annotationType: roi.annotationType === 'polygon' ? 'polygon' : 'rect',
     category: row.category || '',
     remark: row.remark || '',
-    format: roi.format === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+    format: roi.format === 'image/tiff' ? 'image/tiff' : roi.format === 'image/jpeg' ? 'image/jpeg' : 'image/png',
     width: Number(roi.width ?? 0),
     height: Number(roi.height ?? 0),
     image,
@@ -65,7 +65,8 @@ export const samplesApi = {
     form.append('width', String(sample.width))
     form.append('height', String(sample.height))
     if (/^[0-9a-f-]{36}$/i.test(sample.id)) form.append('sample_id', sample.id)
-    form.append('image', sample.image, sample.format === 'image/jpeg' ? 'image.jpg' : 'image.png')
+    const imageFilename = sample.format === 'image/tiff' ? 'image.tif' : sample.format === 'image/jpeg' ? 'image.jpg' : 'image.png'
+    form.append('image', sample.image, imageFilename)
     if (sample.thumbnail) form.append('thumbnail', sample.thumbnail, 'thumbnail.png')
 
     const resp = await fetch(buildUrl('/samples/upload'), { method: 'POST', body: form })
@@ -76,5 +77,44 @@ export const samplesApi = {
 
   async delete(id: string): Promise<void> {
     await requestJson<ApiEnvelope<unknown>>(`/samples/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  },
+
+  async cropFromSource(payload: {
+    imageId: string
+    name: string
+    category: string
+    remark: string
+    annotationId: string
+    annotationType: 'rect' | 'polygon'
+    outputFormat: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff'
+    coordinateWidth: number
+    coordinateHeight: number
+    polygon: Array<{ x: number; y: number }>
+    sampleId?: string
+  }): Promise<SarSample> {
+    const res = await requestJson<ApiEnvelope<ApiSample>>('/samples/crop', {
+      method: 'POST',
+      body: JSON.stringify({
+        image_id: payload.imageId,
+        name: payload.name,
+        category: payload.category,
+        remark: payload.remark,
+        annotation_id: payload.annotationId,
+        annotation_type: payload.annotationType,
+        output_format: payload.outputFormat,
+        coordinate_width: payload.coordinateWidth,
+        coordinate_height: payload.coordinateHeight,
+        polygon: payload.polygon,
+        sample_id: payload.sampleId
+      })
+    })
+    return await mapSample(unwrapEnvelope(res))
+  },
+
+  async exportBlob(id: string, format: 'source' | 'image/png' | 'image/jpeg'): Promise<Blob> {
+    const params = new URLSearchParams({ format })
+    const resp = await fetch(buildUrl(`/samples/${encodeURIComponent(id)}/export?${params}`))
+    if (!resp.ok) throw new Error((await resp.text().catch(() => '')) || `HTTP ${resp.status}`)
+    return await resp.blob()
   }
 }

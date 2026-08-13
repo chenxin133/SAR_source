@@ -37,8 +37,8 @@ class Settings(BaseSettings):
 
     task_time_limit_seconds: int = 300
     task_max_retries: int = 3
-    thumbnail_levels: str = "2048,1024,512,256"
-    thumbnail_quality: int = 80
+    thumbnail_levels: str = "8192,4096,2048,1024,512,256"
+    thumbnail_quality: int = 95
 
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60

@@ -16,6 +16,20 @@ class SampleCreateRequest(BaseModel):
     thumb_storage_key: str | None = None
 
 
+class SampleCropRequest(BaseModel):
+    image_id: uuid.UUID
+    name: str
+    category: str = ""
+    remark: str = ""
+    annotation_id: str
+    annotation_type: str = "rect"
+    output_format: str = "source"
+    coordinate_width: float
+    coordinate_height: float
+    polygon: list[dict[str, float]]
+    sample_id: uuid.UUID | None = None
+
+
 class SampleOut(BaseModel):
     id: uuid.UUID
     image_id: uuid.UUID

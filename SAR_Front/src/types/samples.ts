@@ -9,7 +9,7 @@ export type SarSample = {
   annotationType: AnnotationType
   category: string
   remark: string
-  format: 'image/png' | 'image/jpeg'
+  format: 'image/png' | 'image/jpeg' | 'image/tiff'
   width: number
   height: number
   image: Blob

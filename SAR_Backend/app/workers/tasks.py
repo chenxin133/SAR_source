@@ -161,18 +161,15 @@ def _read_preview_with_gdal(path: str, max_size: int) -> np.ndarray:
 def _sample_raster_for_preview(arr: np.ndarray, max_size: int) -> np.ndarray:
     arr = np.squeeze(arr)
     if arr.ndim == 2:
-        step_y = max(1, math.ceil(arr.shape[0] / max_size))
-        step_x = max(1, math.ceil(arr.shape[1] / max_size))
-        return np.asarray(arr[::step_y, ::step_x])
+        step = max(1, math.ceil(max(arr.shape[0], arr.shape[1]) / max_size))
+        return np.asarray(arr[::step, ::step])
     if arr.ndim == 3:
         if arr.shape[0] <= 4:
-            step_y = max(1, math.ceil(arr.shape[1] / max_size))
-            step_x = max(1, math.ceil(arr.shape[2] / max_size))
-            return np.asarray(arr[:, ::step_y, ::step_x])
+            step = max(1, math.ceil(max(arr.shape[1], arr.shape[2]) / max_size))
+            return np.asarray(arr[:, ::step, ::step])
         if arr.shape[-1] <= 4:
-            step_y = max(1, math.ceil(arr.shape[0] / max_size))
-            step_x = max(1, math.ceil(arr.shape[1] / max_size))
-            return np.asarray(np.moveaxis(arr[::step_y, ::step_x, :], -1, 0))
+            step = max(1, math.ceil(max(arr.shape[0], arr.shape[1]) / max_size))
+            return np.asarray(np.moveaxis(arr[::step, ::step, :], -1, 0))
     raise RuntimeError(f"Unsupported TIFF shape: {arr.shape!r}")
 
 
@@ -318,8 +315,40 @@ def _build_preview_rgb(path: str, max_size: int) -> np.ndarray:
             arr = _read_preview_with_tifffile(path, max_size=max_size)
             rgb = _to_uint8_rgb(_normalize_raster_shape(arr))
         except Exception:
-            rgb = _to_uint8_rgb(_read_preview_with_pillow(path, max_size=max_size))
+            rgb = _to_uint8_rgb(_normalize_raster_shape(_read_preview_with_pillow(path, max_size=max_size)))
     return _resize_rgb(rgb, max_size=max_size)
+
+
+def _read_source_dimensions(path: str) -> tuple[int, int]:
+    try:
+        from osgeo import gdal
+
+        ds = gdal.Open(path, gdal.GA_ReadOnly)
+        if ds is not None:
+            try:
+                return int(ds.RasterXSize), int(ds.RasterYSize)
+            finally:
+                ds = None
+    except Exception:
+        pass
+
+    try:
+        import tifffile
+
+        with tifffile.TiffFile(path) as tif:
+            if tif.series:
+                shape = tuple(int(value) for value in tif.series[0].shape)
+                if len(shape) >= 2:
+                    if len(shape) >= 3 and shape[-1] <= 4:
+                        return shape[-2], shape[-3]
+                    return shape[-1], shape[-2]
+    except Exception:
+        pass
+
+    from PIL import Image as PILImage
+
+    with PILImage.open(path) as opened:
+        return int(opened.width), int(opened.height)
 
 
 def _save_webp(rgb_u8: np.ndarray, out_path: str, quality: int):
@@ -353,6 +382,10 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
         try:
             local_path = os.path.join(tmp, "raw.tif")
             download_object_to_file(bucket=bucket, key=img.storage_key, file_path=local_path)
+            source_width, source_height = _read_source_dimensions(local_path)
+            img.width = source_width
+            img.height = source_height
+            db.commit()
 
             produced: dict[str, str] = {}
             for idx, level in enumerate(levels):

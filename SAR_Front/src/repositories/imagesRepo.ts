@@ -40,6 +40,8 @@ const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): Sa
     resolution: String(img.resolution ?? ''),
     frequencyBand: String(img.frequency_band ?? ''),
     polarization: String(img.polarization ?? ''),
+    width: Number(img.width ?? 0) || undefined,
+    height: Number(img.height ?? 0) || undefined,
     status: img.status,
     description: String(img.description ?? ''),
     previewUrl: previewUrl ?? sameOriginPreviewUrl,
@@ -259,5 +261,27 @@ export const imagesRepo = {
     if (mode === 'local') return await rawImagesRepo.getFile(id)
     // 后端模式：前端默认只展示缩略图/预览 URL，不拉取原始大文件
     return undefined
+  },
+
+  async ensureHighResolutionPreview(id: string, minLevel = 8192): Promise<SarImage | undefined> {
+    if (getStorageMode() !== 'backend') return undefined
+    let thumbs = await imagesApi.getThumbnails(id).catch(() => [])
+    const currentMax = Math.max(0, ...thumbs.map((thumbnail) => Number(thumbnail.level || 0)))
+    if (currentMax < minLevel) {
+      const { task_id } = await imagesApi.process(id)
+      const result = await waitTask(task_id, { timeoutMs: 5 * 60_000, preferSse: true })
+      if (String(result.status).toLowerCase() !== 'succeeded') {
+        throw new Error(result.error ? String(result.error) : '高清预览生成失败')
+      }
+      thumbs = await imagesApi.getThumbnails(id)
+    }
+    const detail = await imagesApi.getDetail(id)
+    const mapped = mapApiImageToSarImage(detail.image, thumbs.length ? thumbs : detail.thumbnails)
+    const cacheBust = (url?: string) => {
+      if (!url) return url
+      return `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`
+    }
+    mapped.previewUrl = cacheBust(mapped.previewUrl)
+    return mapped
   }
 }

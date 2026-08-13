@@ -7,6 +7,8 @@ export interface SarImage {
   resolution?: string;
   frequencyBand?: string; // Ka, Ku, X, C
   polarization?: string; // Single, dual, or quad polarization combination
+  width?: number;
+  height?: number;
   status: string; // 'Uploading' | 'Processing' | 'Ready' | 'Error';
   description?: string;
   thumbnailUrl?: string; // Mock URL

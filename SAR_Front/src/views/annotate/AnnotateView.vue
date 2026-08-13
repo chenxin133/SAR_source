@@ -102,8 +102,10 @@
               <el-form-item label="样本">
                 <div class="sample-actions">
                   <el-select v-model="sampleFormat" style="width: 120px">
+                    <el-option value="source" label="源格式" />
                     <el-option value="image/png" label="PNG" />
                     <el-option value="image/jpeg" label="JPG" />
+                    <el-option value="image/tiff" label="TIFF" />
                   </el-select>
                   <el-button type="primary" @click="cropSelectedToSample">裁切并保存</el-button>
                 </div>
@@ -142,9 +144,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { SarImage } from '../../types/sar'
 import type { AnnotationsFileV1, SarAnnotation, XY } from '../../types/annotations'
 import { imagesRepo } from '../../repositories/imagesRepo'
+import { imagesApi } from '../../services/imagesApi'
 import { annotationsRepo } from '../../repositories/annotationsRepo'
 import { samplesRepo } from '../../repositories/samplesRepo'
 import type { SarSample } from '../../types/samples'
+import { getStorageMode } from '../../config/storage'
 
 const route = useRoute()
 const router = useRouter()
@@ -174,7 +178,8 @@ const selectedAnnotation = computed(() => annotations.value.find((a) => a.id ===
 const editCategory = ref('')
 const editRemark = ref('')
 
-const sampleFormat = ref<SarSample['format']>('image/png')
+type SampleOutputFormat = 'source' | SarSample['format']
+const sampleFormat = ref<SampleOutputFormat>('source')
 const autoGenerateSamplesOnSave = ref(false)
 
 const metaDialogVisible = ref(false)
@@ -185,6 +190,9 @@ let pendingType: 'rect' | 'polygon' | null = null
 const canvasLoading = ref(false)
 let canvas: Canvas | null = null
 let bgObject: FabricImage | null = null
+let detailObject: FabricImage | null = null
+let detailTimer: number | null = null
+let detailRequestId = 0
 const objectById = new Map<string, Rect | Polygon>()
 
 const viewZoom = ref(1)
@@ -208,10 +216,13 @@ const cloneAnnotations = (list: SarAnnotation[]): SarAnnotation[] => {
 }
 
 const buildPayload = (): AnnotationsFileV1 => {
+  const coordinateSize = getImageSize()
   return {
     version: 1,
     imageId: currentImageId.value,
     exportedAt: Date.now(),
+    coordinateWidth: coordinateSize.w,
+    coordinateHeight: coordinateSize.h,
     annotations: cloneAnnotations(annotations.value)
   }
 }
@@ -412,8 +423,8 @@ const getScenePoint = (evt: MouseEvent) => {
 }
 
 const getImageSize = () => {
-  const w = (bgObject?.width ?? 0) as number
-  const h = (bgObject?.height ?? 0) as number
+  const w = Number((bgObject as any)?.coordinateWidth || bgObject?.getScaledWidth() || bgObject?.width || 0)
+  const h = Number((bgObject as any)?.coordinateHeight || bgObject?.getScaledHeight() || bgObject?.height || 0)
   return { w: Math.max(1, w), h: Math.max(1, h) }
 }
 
@@ -477,6 +488,86 @@ const applyViewTransform = () => {
   canvas.setViewportTransform(buildViewMatrix() as any)
   for (const obj of canvas.getObjects()) obj.setCoords()
   canvas.requestRenderAll()
+  scheduleDetailRefresh()
+}
+
+const clearDetailObject = () => {
+  detailRequestId++
+  if (detailTimer) window.clearTimeout(detailTimer)
+  detailTimer = null
+  if (canvas && detailObject) canvas.remove(detailObject)
+  detailObject = null
+}
+
+const scheduleDetailRefresh = () => {
+  if (getStorageMode() !== 'backend' || !canvas || !bgObject || !currentImageId.value) return
+  if (detailTimer) window.clearTimeout(detailTimer)
+  detailTimer = window.setTimeout(() => void refreshDetailRegion(), 180)
+}
+
+const refreshDetailRegion = async () => {
+  detailTimer = null
+  if (!canvas || !bgObject || !currentImageId.value) return
+  const previewWidth = Number((bgObject as any).previewCoordinateWidth || 0)
+  const { w: imageWidth, h: imageHeight } = getImageSize()
+  const previewScale = previewWidth / Math.max(1, imageWidth)
+  if (viewZoom.value <= previewScale * 1.15) {
+    clearDetailObject()
+    canvas.requestRenderAll()
+    return
+  }
+
+  const inverse = util.invertTransform(buildViewMatrix() as any)
+  const corners = [
+    { x: 0, y: 0 },
+    { x: canvas.getWidth(), y: 0 },
+    { x: canvas.getWidth(), y: canvas.getHeight() },
+    { x: 0, y: canvas.getHeight() }
+  ].map((point) => {
+    const scene = util.transformPoint(new Point(point.x, point.y), inverse as any)
+    return scenePointToImagePoint({ x: scene.x, y: scene.y })
+  })
+  const x = Math.max(0, Math.floor(Math.min(...corners.map((point) => point.x))))
+  const y = Math.max(0, Math.floor(Math.min(...corners.map((point) => point.y))))
+  const right = Math.min(imageWidth, Math.ceil(Math.max(...corners.map((point) => point.x))))
+  const bottom = Math.min(imageHeight, Math.ceil(Math.max(...corners.map((point) => point.y))))
+  if (right <= x || bottom <= y || (right - x) * (bottom - y) > 64_000_000) return
+
+  const requestId = ++detailRequestId
+  try {
+    const blob = await imagesApi.getRegion(currentImageId.value, {
+      x,
+      y,
+      width: right - x,
+      height: bottom - y,
+      maxSize: Math.min(4096, Math.max(2048, Math.ceil(Math.max(canvas.getWidth(), canvas.getHeight()) * devicePixelRatio)))
+    })
+    if (requestId !== detailRequestId || !canvas) return
+    const url = URL.createObjectURL(blob)
+    const detail = await FabricImage.fromURL(url)
+    URL.revokeObjectURL(url)
+    if (requestId !== detailRequestId || !canvas) return
+    if (detailObject) canvas.remove(detailObject)
+    const center = imagePointToScenePoint({ x: x + (right - x) / 2, y: y + (bottom - y) / 2 })
+    detail.set({
+      left: center.x,
+      top: center.y,
+      scaleX: (right - x) / Math.max(1, Number(detail.width || 0)),
+      scaleY: (bottom - y) / Math.max(1, Number(detail.height || 0)),
+      originX: 'center',
+      originY: 'center',
+      angle: rotationDeg.value,
+      selectable: false,
+      evented: false
+    })
+    detailObject = detail
+    canvas.add(detail)
+    canvas.sendObjectToBack(detail)
+    if (bgObject) canvas.sendObjectToBack(bgObject)
+    canvas.requestRenderAll()
+  } catch {
+    // Keep the full-image preview visible when a detail request is interrupted.
+  }
 }
 
 const setTool = (t: 'select' | 'rect' | 'polygon') => {
@@ -529,6 +620,7 @@ watch(
 )
 
 const cleanupCanvas = () => {
+  clearDetailObject()
   if (!canvas) return
   canvas.off()
   canvas.dispose()
@@ -573,7 +665,7 @@ const initCanvas = async () => {
 
 const clearObjects = () => {
   if (!canvas) return
-  const keep = bgObject ? new Set([bgObject]) : new Set()
+  const keep = new Set([bgObject, detailObject].filter(Boolean) as FabricImage[])
   const all = canvas.getObjects()
   for (const obj of all) {
     if (!keep.has(obj as any)) canvas.remove(obj)
@@ -591,6 +683,13 @@ const loadImageToCanvas = async (imageId: string) => {
   try {
     if (String(meta.status || '').toLowerCase() === 'failed' && meta.errorMessage) {
       throw new Error(`影像预处理失败：${meta.errorMessage}`)
+    }
+    if (getStorageMode() === 'backend') {
+      const enhanced = await imagesRepo.ensureHighResolutionPreview(imageId).catch((error: any) => {
+        ElMessage.warning(error?.message ? `高清预览生成失败，暂时使用现有预览：${error.message}` : '高清预览生成失败，暂时使用现有预览')
+        return undefined
+      })
+      if (enhanced) Object.assign(meta, enhanced)
     }
     const blob = await imagesRepo.getFile(imageId)
     const sameOriginPreview = `/api/v1/images/${encodeURIComponent(imageId)}/preview`
@@ -614,6 +713,22 @@ const loadImageToCanvas = async (imageId: string) => {
 
     if (!img) throw new Error('影像加载失败')
 
+    const previewWidth = Math.max(1, Number(img.width || 0))
+    const previewHeight = Math.max(1, Number(img.height || 0))
+    const coordinateWidth = Math.max(1, Number(meta.width || previewWidth))
+    const coordinateHeight = Math.max(1, Number(meta.height || previewHeight))
+    ;(img as any).previewCoordinateWidth = previewWidth
+    ;(img as any).previewCoordinateHeight = previewHeight
+    ;(img as any).coordinateWidth = coordinateWidth
+    ;(img as any).coordinateHeight = coordinateHeight
+    img.set({
+      scaleX: coordinateWidth / previewWidth,
+      scaleY: coordinateHeight / previewHeight
+    })
+
+    clearDetailObject()
+    if (bgObject) canvas.remove(bgObject)
+    bgObject = null
     clearObjects()
     selectedAnnotationId.value = null
     bgObject = img
@@ -937,6 +1052,18 @@ const getAnnotationCropRegion = (ann: SarAnnotation) => {
   return { cx, cy, cw, ch, poly }
 }
 
+const getAnnotationPolygon = (ann: SarAnnotation): XY[] => {
+  if (ann.type === 'polygon') return ann.points.map((point) => ({ ...point }))
+  const points = (ann as any).points as XY[] | undefined
+  if (points?.length) return points.map((point) => ({ ...point }))
+  return [
+    { x: ann.rect.x, y: ann.rect.y },
+    { x: ann.rect.x + ann.rect.w, y: ann.rect.y },
+    { x: ann.rect.x + ann.rect.w, y: ann.rect.y + ann.rect.h },
+    { x: ann.rect.x, y: ann.rect.y + ann.rect.h }
+  ]
+}
+
 const buildSampleFromAnnotation = async (
   ann: SarAnnotation,
   src: HTMLImageElement | HTMLCanvasElement,
@@ -947,6 +1074,23 @@ const buildSampleFromAnnotation = async (
   const region = getAnnotationCropRegion(ann)
   if (!region) return null
 
+  if (getStorageMode() === 'backend') {
+    const coordinateSize = getImageSize()
+    return await samplesRepo.cropFromSource({
+      imageId: currentImageId.value,
+      name,
+      category: ann.category,
+      remark: ann.remark,
+      annotationId: ann.id,
+      annotationType: ann.type,
+      outputFormat: sampleFormat.value,
+      coordinateWidth: coordinateSize.w,
+      coordinateHeight: coordinateSize.h,
+      polygon: getAnnotationPolygon(ann),
+      sampleId: existing?.id
+    })
+  }
+
   const { cx, cy, cw, ch, poly } = region
   const out = document.createElement('canvas')
   out.width = cw
@@ -954,7 +1098,8 @@ const buildSampleFromAnnotation = async (
   const ctx = out.getContext('2d')
   if (!ctx) return null
 
-  if (sampleFormat.value === 'image/jpeg') {
+  const localFormat: SarSample['format'] = sampleFormat.value === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+  if (localFormat === 'image/jpeg') {
     ctx.fillStyle = '#000'
     ctx.fillRect(0, 0, cw, ch)
   }
@@ -970,7 +1115,7 @@ const buildSampleFromAnnotation = async (
     ctx.globalCompositeOperation = 'source-over'
   }
 
-  const blob = await canvasToBlob(out, sampleFormat.value, sampleFormat.value === 'image/jpeg' ? 0.92 : undefined)
+  const blob = await canvasToBlob(out, localFormat, localFormat === 'image/jpeg' ? 0.95 : undefined)
   if (blob.size <= 0) return null
   const thumbCanvas = downscaleCanvas(out, 256)
   const thumbnail = await canvasToBlob(thumbCanvas, 'image/png')
@@ -984,7 +1129,7 @@ const buildSampleFromAnnotation = async (
     annotationType: ann.type,
     category: ann.category,
     remark: ann.remark,
-    format: sampleFormat.value,
+    format: localFormat,
     width: cw,
     height: ch,
     image: blob,
@@ -1026,7 +1171,7 @@ const cropSelectedToSample = async () => {
     return
   }
   try {
-    const savedSample = await samplesRepo.put(sample)
+    const savedSample = getStorageMode() === 'backend' ? sample : await samplesRepo.put(sample)
     sample.id = savedSample.id
   } catch (e: any) {
     ElMessage.error(e?.message ? `保存样本失败：${e.message}` : '保存样本失败')
@@ -1059,7 +1204,7 @@ const autoGenerateSamplesForCurrentImage = async () => {
     const baseName = `${currentImage.value?.name || currentImageId.value}_${ann.category || ann.type}_${ann.id}`
     const sample = await buildSampleFromAnnotation(ann, src, baseName, existingMap.get(ann.id))
     if (!sample) continue
-    await samplesRepo.put(sample)
+    if (getStorageMode() !== 'backend') await samplesRepo.put(sample)
     saved += 1
   }
   return saved
@@ -1581,7 +1726,39 @@ const loadForImage = async (id: string) => {
   historyFuture.value = []
   await loadImageToCanvas(id)
   const saved = await annotationsRepo.get(id)
-  applyAnnotations(saved?.annotations ? cloneAnnotations(saved.annotations) : [], false)
+  if (!saved?.annotations) {
+    applyAnnotations([], false)
+    return
+  }
+  const currentSize = getImageSize()
+  const fallbackWidth = Number((bgObject as any)?.previewCoordinateWidth || currentSize.w)
+  const fallbackHeight = Number((bgObject as any)?.previewCoordinateHeight || currentSize.h)
+  const legacyScale = Math.min(1, 2048 / Math.max(currentSize.w, currentSize.h))
+  const legacyWidth = Math.max(1, Math.round(currentSize.w * legacyScale))
+  const legacyHeight = Math.max(1, Math.round(currentSize.h * legacyScale))
+  const savedWidth = Number(saved.coordinateWidth || (currentImage.value?.width ? legacyWidth : fallbackWidth))
+  const savedHeight = Number(saved.coordinateHeight || (currentImage.value?.height ? legacyHeight : fallbackHeight))
+  const scaleX = currentSize.w / Math.max(1, savedWidth)
+  const scaleY = currentSize.h / Math.max(1, savedHeight)
+  const migrated = cloneAnnotations(saved.annotations).map((annotation) => {
+    if (Math.abs(scaleX - 1) < 1e-9 && Math.abs(scaleY - 1) < 1e-9) return annotation
+    if (annotation.type === 'polygon') {
+      annotation.points = annotation.points.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY }))
+      return annotation
+    }
+    annotation.rect = {
+      x: annotation.rect.x * scaleX,
+      y: annotation.rect.y * scaleY,
+      w: annotation.rect.w * scaleX,
+      h: annotation.rect.h * scaleY
+    }
+    if (annotation.points) {
+      annotation.points = annotation.points.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY }))
+    }
+    return annotation
+  })
+  applyAnnotations(migrated, false)
+  if (Math.abs(scaleX - 1) >= 1e-9 || Math.abs(scaleY - 1) >= 1e-9) schedulePersist()
 }
 
 const saveToLocal = async () => {

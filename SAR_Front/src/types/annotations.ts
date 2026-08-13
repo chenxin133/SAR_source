@@ -38,5 +38,7 @@ export type AnnotationsFileV1 = {
   version: 1
   imageId: string
   exportedAt: number
+  coordinateWidth?: number
+  coordinateHeight?: number
   annotations: SarAnnotation[]
 }

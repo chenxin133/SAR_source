@@ -295,7 +295,7 @@ const clearPreview = () => {
 const openPreview = (row: Row) => {
   clearPreview()
   previewSample.value = row.raw
-  previewUrl.value = URL.createObjectURL(row.raw.image)
+  previewUrl.value = URL.createObjectURL(row.raw.thumbnail || row.raw.image)
   previewVisible.value = true
 }
 
@@ -311,7 +311,7 @@ const openAnnotate = (row: Row) => {
 
 type ExportCommand = 'origin' | 'image/png' | 'image/jpeg'
 const sanitizeFileName = (name: string) => name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'sample'
-const extFromType = (type: SarSample['format']) => (type === 'image/png' ? 'png' : 'jpg')
+const extFromType = (type: SarSample['format']) => (type === 'image/tiff' ? 'tif' : type === 'image/png' ? 'png' : 'jpg')
 const triggerDownload = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -339,8 +339,20 @@ const transcodeImageBlob = async (blob: Blob, target: SarSample['format']) => {
   })
 }
 const exportOne = async (sample: SarSample, command: ExportCommand) => {
-  const type = command === 'origin' ? sample.format : command
-  const blob = command === 'origin' ? sample.image : await transcodeImageBlob(sample.image, type)
+  const blob =
+    command === 'origin'
+      ? await samplesRepo.exportBlob(sample, 'source')
+      : sample.format === 'image/tiff'
+        ? await samplesRepo.exportBlob(sample, command)
+        : await transcodeImageBlob(sample.image, command)
+  const type: SarSample['format'] =
+    command === 'origin'
+      ? blob.type === 'image/tiff'
+        ? 'image/tiff'
+        : blob.type === 'image/jpeg'
+          ? 'image/jpeg'
+          : 'image/png'
+      : command
   triggerDownload(blob, `${sanitizeFileName(sample.name)}_${sample.id}.${extFromType(type)}`)
 }
 const handleExportOne = async (sample: SarSample, command: unknown) => {

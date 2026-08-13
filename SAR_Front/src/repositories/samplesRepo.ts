@@ -68,5 +68,19 @@ export const samplesRepo = {
       (sample) => sample.imageId === imageId && sample.annotationId === annotationId
     )
     await Promise.all(matches.map((sample) => samplesRepo.delete(sample.id)))
+  },
+
+  async cropFromSource(payload: Parameters<typeof samplesApi.cropFromSource>[0]): Promise<SarSample> {
+    if (getStorageMode() !== 'backend') throw new Error('源文件裁切仅适用于后端存储模式')
+    const saved = await samplesApi.cropFromSource(payload)
+    emitSamplesChanged()
+    return saved
+  },
+
+  async exportBlob(sample: SarSample, format: 'source' | 'image/png' | 'image/jpeg'): Promise<Blob> {
+    if (getStorageMode() === 'backend' && /^[0-9a-f-]{36}$/i.test(sample.id)) {
+      return await samplesApi.exportBlob(sample.id, format)
+    }
+    return sample.image
   }
 }

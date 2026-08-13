@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import tempfile
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import numpy as np
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
+from PIL import Image as PILImage, TiffImagePlugin
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,12 +27,41 @@ from app.schemas.images import (
     UploadInitRequest,
     UploadInitResponse,
 )
-from app.storage import delete_object, guess_content_type, presign_get_url, put_file, read_object_bytes
+from app.storage import (
+    delete_object,
+    download_object_to_file,
+    guess_content_type,
+    local_object_path,
+    presign_get_url,
+    put_file,
+    read_object_bytes,
+    use_local_storage,
+)
 from app.upload_service import assemble, cleanup, init_upload, write_part
 from app.workers.client import enqueue_process_image
 
 
 router = APIRouter()
+
+
+def _region_to_rgb(crop: PILImage.Image) -> PILImage.Image:
+    array = np.asarray(crop)
+    if array.ndim == 2:
+        values = array.astype(np.float32, copy=False)
+        finite = np.isfinite(values)
+        if not np.any(finite):
+            gray = np.zeros(values.shape, dtype=np.uint8)
+        else:
+            valid = values[finite]
+            low, high = np.percentile(valid, (2, 98))
+            if not np.isfinite(low) or not np.isfinite(high) or high <= low:
+                low, high = float(valid.min()), float(valid.max())
+            if high <= low:
+                high = low + 1.0
+            gray = (np.clip((values - low) / (high - low), 0, 1) * 255).astype(np.uint8)
+            gray[~finite] = 0
+        return PILImage.fromarray(gray, mode="L").convert("RGB")
+    return crop.convert("RGB")
 
 
 @router.get("", response_model=Envelope[list[ImageOut]])
@@ -296,3 +329,47 @@ def get_preview_content(
     if not media_type or media_type == "application/octet-stream":
         media_type = f"image/{(t.format or 'webp').lower()}"
     return Response(content=content, media_type=media_type)
+
+
+@router.get("/{image_id}/region")
+def get_image_region(
+    image_id: uuid.UUID,
+    x: int = Query(ge=0),
+    y: int = Query(ge=0),
+    width: int = Query(gt=0),
+    height: int = Query(gt=0),
+    max_size: int = Query(default=3072, ge=256, le=4096),
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_project),
+):
+    image = db.scalar(select(Image).where(Image.project_id == project.id, Image.id == image_id))
+    if image is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    if width * height > 64_000_000:
+        raise HTTPException(status_code=400, detail="Requested region is too large")
+
+    settings = get_settings()
+    with tempfile.TemporaryDirectory() as tmp:
+        local_source = local_object_path(bucket=settings.s3_bucket, key=image.storage_key) if use_local_storage() else None
+        if local_source is not None and local_source.is_file():
+            source_path = str(local_source)
+        else:
+            source_path = os.path.join(tmp, os.path.basename(image.original_filename or image.name) or "source")
+            download_object_to_file(bucket=settings.s3_bucket, key=image.storage_key, file_path=source_path)
+        is_tiff = "tiff" in str(image.mime_type or "").lower() or source_path.lower().endswith((".tif", ".tiff"))
+        opened = TiffImagePlugin.TiffImageFile(source_path) if is_tiff else PILImage.open(source_path)
+        try:
+            source_width, source_height = opened.size
+            right = min(source_width, x + width)
+            bottom = min(source_height, y + height)
+            if x >= right or y >= bottom:
+                raise HTTPException(status_code=400, detail="Region is outside the image")
+            crop = opened.crop((x, y, right, bottom))
+            crop.load()
+            rendered = _region_to_rgb(crop)
+            rendered.thumbnail((max_size, max_size), resample=PILImage.Resampling.LANCZOS)
+            output_path = os.path.join(tmp, "region.webp")
+            rendered.save(output_path, format="WEBP", quality=95, method=4)
+            return Response(content=Path(output_path).read_bytes(), media_type="image/webp")
+        finally:
+            opened.close()

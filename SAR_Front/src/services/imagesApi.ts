@@ -9,6 +9,22 @@ import type {
 import { unwrapEnvelope } from '../types/backend'
 
 export const imagesApi = {
+  async getRegion(
+    imageId: string,
+    region: { x: number; y: number; width: number; height: number; maxSize?: number }
+  ): Promise<Blob> {
+    const query = new URLSearchParams({
+      x: String(Math.max(0, Math.floor(region.x))),
+      y: String(Math.max(0, Math.floor(region.y))),
+      width: String(Math.max(1, Math.ceil(region.width))),
+      height: String(Math.max(1, Math.ceil(region.height))),
+      max_size: String(region.maxSize ?? 3072)
+    })
+    const response = await fetch(buildUrl(`/images/${encodeURIComponent(imageId)}/region?${query}`))
+    if (!response.ok) throw new Error((await response.text().catch(() => '')) || `HTTP ${response.status}`)
+    return await response.blob()
+  },
+
   async list(params?: { limit?: number; offset?: number }): Promise<ApiImageOut[]> {
     const q = new URLSearchParams()
     if (params?.limit != null) q.set('limit', String(params.limit))
