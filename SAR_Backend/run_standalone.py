@@ -33,7 +33,8 @@ def main() -> None:
         sys.path.insert(0, str(base))
     (base / "data").mkdir(parents=True, exist_ok=True)
     _set_defaults(base)
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)
+    port = int(os.environ.get("SAR_BACKEND_PORT", "8000"))
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=False)
 
 
 if __name__ == "__main__":
