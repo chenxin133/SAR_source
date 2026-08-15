@@ -69,26 +69,17 @@ def _apply_polygon_mask(crop: PILImage.Image, polygon: list[tuple[float, float]]
         return PILImage.composite(rgb, PILImage.new("RGB", rgb.size, 0), mask)
 
 
-def _save_crop(image: PILImage.Image, path: str, output_format: str) -> None:
-    if output_format == "JPEG":
-        image.convert("RGB").save(path, format="JPEG", quality=95, subsampling=0)
-    elif output_format == "TIFF":
-        image.save(path, format="TIFF", compression="tiff_deflate")
-    else:
-        image.save(path, format="PNG", compress_level=6)
-
-
-def _sample_thumbnail(image: PILImage.Image) -> PILImage.Image:
+def _display_image(image: PILImage.Image) -> PILImage.Image:
     array = np.asarray(image)
     if array.ndim != 2 or array.dtype == np.uint8:
-        return image.convert("RGB")
+        return image.copy()
 
     values = array.astype(np.float32, copy=False)
     finite = np.isfinite(values)
     nonzero = finite & (values != 0)
     valid_mask = nonzero if np.any(nonzero) else finite
     if not np.any(valid_mask):
-        return PILImage.new("RGB", image.size, 0)
+        return PILImage.new("L", image.size, 0)
 
     valid = values[valid_mask]
     low, high = np.percentile(valid, (2, 98))
@@ -97,10 +88,36 @@ def _sample_thumbnail(image: PILImage.Image) -> PILImage.Image:
     if high <= low:
         gray = np.zeros(values.shape, dtype=np.uint8)
         gray[valid_mask] = 192
-        return PILImage.fromarray(gray, mode="L").convert("RGB")
+        return PILImage.fromarray(gray, mode="L")
     gray = (np.clip((values - low) / (high - low), 0, 1) * 255).astype(np.uint8)
     gray[~valid_mask] = 0
-    return PILImage.fromarray(gray, mode="L").convert("RGB")
+    return PILImage.fromarray(gray, mode="L")
+
+
+def _save_crop(
+    image: PILImage.Image,
+    path: str,
+    output_format: str,
+    *,
+    preserve_values: bool = False,
+) -> None:
+    if output_format == "TIFF" and preserve_values:
+        image.save(path, format="TIFF", compression="tiff_deflate")
+        return
+
+    rendered = _display_image(image)
+    if output_format == "JPEG":
+        rendered.convert("RGB").save(path, format="JPEG", quality=95, subsampling=0)
+    elif output_format == "TIFF":
+        rendered.convert("RGB").save(path, format="TIFF", compression="tiff_deflate")
+    else:
+        if rendered.mode not in {"1", "L", "LA", "P", "RGB", "RGBA"}:
+            rendered = rendered.convert("RGB")
+        rendered.save(path, format="PNG", compress_level=6)
+
+
+def _sample_thumbnail(image: PILImage.Image) -> PILImage.Image:
+    return _display_image(image).convert("RGB")
 
 
 def _annotation_polygon(annotation: dict) -> list[dict[str, float]]:
@@ -237,7 +254,12 @@ def _render_source_crop(
             crop = crop.copy()
             local_polygon = [(x - min_x, y - min_y) for x, y in source_polygon]
             crop = _apply_polygon_mask(crop, local_polygon, pil_format)
-            _save_crop(crop, crop_path, pil_format)
+            _save_crop(
+                crop,
+                crop_path,
+                pil_format,
+                preserve_values=output_format.strip().lower() == "source",
+            )
 
             thumb = _sample_thumbnail(crop)
             thumb.thumbnail((256, 256), resample=PILImage.Resampling.LANCZOS)

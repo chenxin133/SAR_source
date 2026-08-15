@@ -11,6 +11,7 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="origin">原格式</el-dropdown-item>
+              <el-dropdown-item command="image/tiff">可视化 TIFF</el-dropdown-item>
               <el-dropdown-item command="image/png">PNG</el-dropdown-item>
               <el-dropdown-item command="image/jpeg">JPEG</el-dropdown-item>
             </el-dropdown-menu>
@@ -62,6 +63,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="origin">原格式</el-dropdown-item>
+                <el-dropdown-item command="image/tiff">可视化 TIFF</el-dropdown-item>
                 <el-dropdown-item command="image/png">PNG</el-dropdown-item>
                 <el-dropdown-item command="image/jpeg">JPEG</el-dropdown-item>
               </el-dropdown-menu>
@@ -309,7 +311,7 @@ const openAnnotate = (row: Row) => {
   router.push({ name: 'annotate', query })
 }
 
-type ExportCommand = 'origin' | 'image/png' | 'image/jpeg'
+type ExportCommand = 'origin' | 'image/tiff' | 'image/png' | 'image/jpeg'
 const sanitizeFileName = (name: string) => name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'sample'
 const extFromType = (type: SarSample['format']) => (type === 'image/tiff' ? 'tif' : type === 'image/png' ? 'png' : 'jpg')
 const triggerDownload = (blob: Blob, filename: string) => {
@@ -342,7 +344,7 @@ const exportOne = async (sample: SarSample, command: ExportCommand) => {
   const blob =
     command === 'origin'
       ? await samplesRepo.exportBlob(sample, 'source')
-      : sample.format === 'image/tiff'
+      : sample.format === 'image/tiff' || command === 'image/tiff'
         ? await samplesRepo.exportBlob(sample, command)
         : await transcodeImageBlob(sample.image, command)
   const type: SarSample['format'] =

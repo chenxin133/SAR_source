@@ -149,6 +149,46 @@ def test_crop_sample_from_source_preserves_tiff_format(client, db_session, monke
         assert thumbnail.getextrema() != ((0, 0), (0, 0), (0, 0))
 
 
+def test_float_tiff_sample_exports_visible_png_jpeg_and_tiff(client, db_session, monkeypatch, tmp_path):
+    image_id = _create_image(db_session)
+    project = db_session.query(Project).filter(Project.name == get_settings().default_project_name).first()
+    sample_id = uuid.uuid4()
+    float_data = np.geomspace(20_000, 2_000_000_000, num=40 * 30, dtype=np.float32).reshape(30, 40)
+    source_path = tmp_path / "float-sample.tif"
+    PILImage.fromarray(float_data, mode="F").save(source_path, format="TIFF")
+    db_session.add(
+        Sample(
+            id=sample_id,
+            project_id=project.id,
+            image_id=image_id,
+            name="float-sample",
+            roi={"format": "image/tiff"},
+            crop_storage_key=f"samples/{image_id}/{sample_id}/image.tif",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.api.routes.samples.download_object_to_file",
+        lambda **kwargs: shutil.copy2(source_path, kwargs["file_path"]),
+    )
+
+    for requested, expected_type, expected_format in (
+        ("image/png", "image/png", "PNG"),
+        ("image/jpeg", "image/jpeg", "JPEG"),
+        ("image/tiff", "image/tiff", "TIFF"),
+    ):
+        response = client.get(f"/api/v1/samples/{sample_id}/export", params={"format": requested})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(expected_type)
+        exported_path = tmp_path / f"export-{expected_format.lower()}"
+        exported_path.write_bytes(response.content)
+        with PILImage.open(exported_path) as exported:
+            assert exported.format == expected_format
+            extrema = exported.convert("L").getextrema()
+            assert extrema[0] < extrema[1]
+            assert extrema != (255, 255)
+
+
 def test_old_png_sample_exports_from_source_tiff(client, db_session, monkeypatch, tmp_path):
     image_id = _create_image(db_session)
     project = db_session.query(Project).filter(Project.name == get_settings().default_project_name).first()

@@ -111,7 +111,7 @@ export const samplesApi = {
     return await mapSample(unwrapEnvelope(res))
   },
 
-  async exportBlob(id: string, format: 'source' | 'image/png' | 'image/jpeg'): Promise<Blob> {
+  async exportBlob(id: string, format: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff'): Promise<Blob> {
     const params = new URLSearchParams({ format })
     const resp = await fetch(buildUrl(`/samples/${encodeURIComponent(id)}/export?${params}`))
     if (!resp.ok) throw new Error((await resp.text().catch(() => '')) || `HTTP ${resp.status}`)

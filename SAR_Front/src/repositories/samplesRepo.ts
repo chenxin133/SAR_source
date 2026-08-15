@@ -77,7 +77,7 @@ export const samplesRepo = {
     return saved
   },
 
-  async exportBlob(sample: SarSample, format: 'source' | 'image/png' | 'image/jpeg'): Promise<Blob> {
+  async exportBlob(sample: SarSample, format: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff'): Promise<Blob> {
     if (getStorageMode() === 'backend' && /^[0-9a-f-]{36}$/i.test(sample.id)) {
       return await samplesApi.exportBlob(sample.id, format)
     }
