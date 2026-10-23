@@ -26,7 +26,7 @@ const router = createRouter({
     {
       path: '/data/echo',
       name: 'echo-data',
-      redirect: { name: 'raw-data' }
+      component: () => import('../views/data/EchoDataView.vue')
     },
     {
       path: '/data/:pathMatch(.*)*',

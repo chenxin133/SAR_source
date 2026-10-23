@@ -77,6 +77,41 @@ class Image(Base):
     )
 
 
+class EchoSignal(Base):
+    __tablename__ = "echo_signals"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    remark: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    frequency_band: Mapped[str | None] = mapped_column(Text)
+    center_frequency_ghz: Mapped[float | None] = mapped_column(Float)
+    na: Mapped[int] = mapped_column(Integer, nullable=False)
+    nr: Mapped[int] = mapped_column(Integer, nullable=False)
+    byte_order: Mapped[str] = mapped_column(Text, nullable=False)
+    iq_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    gate_min: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gate_max: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    preview_key: Mapped[str] = mapped_column(Text, nullable=False)
+    simulation: Mapped[dict | None] = mapped_column(JsonType)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="RESTRICT"),
+        CheckConstraint("na > 0 AND nr > 0", name="echo_dimensions_positive"),
+        CheckConstraint("source IN ('imported','simulated')", name="echo_source_valid"),
+        CheckConstraint("byte_order IN ('little','big')", name="echo_byte_order_valid"),
+        CheckConstraint("iq_offset IN (0,32768)", name="echo_iq_offset_valid"),
+        Index("ix_echo_project_created", "project_id", "created_at"),
+    )
+
+
 class Thumbnail(Base):
     __tablename__ = "thumbnails"
 

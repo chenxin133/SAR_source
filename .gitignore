@@ -9,6 +9,10 @@ SAR_exe_release_*.zip
 样本数据/
 
 # Runtime and generated data
+/SAR_Backend/data/
+**/.pytest_cache/
+**/.ruff_cache/
+.coverage
 logs/
 temp/
 reports/*.json

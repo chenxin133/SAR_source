@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.routes import annotations, health, images, imports, samples, storage, tasks, tiff_compat
+from app.api.routes import annotations, echoes, health, images, imports, samples, storage, tasks, tiff_compat
 
 
 api_router = APIRouter()
+api_router.include_router(echoes.router, prefix="/echoes", tags=["echoes"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(images.router, prefix="/images", tags=["images"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])

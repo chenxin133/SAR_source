@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import inspect, select, text
 
 from app.api.router import api_router
@@ -76,6 +77,10 @@ def create_app() -> FastAPI:
     if dist_dir:
         p = Path(dist_dir)
         if p.exists() and p.is_dir():
+            @app.get("/data/echo", include_in_schema=False)
+            def echo_page():
+                return FileResponse(p / "index.html")
+
             app.mount("/", StaticFiles(directory=str(p), html=True), name="frontend")
 
     return app
