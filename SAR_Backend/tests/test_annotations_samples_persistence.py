@@ -356,3 +356,45 @@ def test_crop_png_source_to_tiff_uses_png_reader(client, db_session, monkeypatch
         assert crop.format == "TIFF"
         assert crop.size == (60, 50)
         assert crop.getpixel((20, 20)) == (40, 80, 120)
+
+
+def test_uploaded_tiff_sample_keeps_original_bytes_and_exports_source(client, db_session, monkeypatch):
+    import io
+
+    image_id = _create_image(db_session)
+    data = np.array([[0, 1000, 65535], [123, 4096, 8000]], dtype=np.uint16)
+    buffer = io.BytesIO()
+    PILImage.fromarray(data).save(buffer, format="TIFF", compression="tiff_deflate")
+    original = buffer.getvalue()
+    thumb = io.BytesIO()
+    PILImage.new("RGB", (3, 2), (128, 128, 128)).save(thumb, format="PNG")
+    stored = {}
+    monkeypatch.setattr(
+        "app.api.routes.samples.put_file",
+        lambda **kw: stored.update({kw["key"]: Path(kw["file_path"]).read_bytes()}),
+    )
+    monkeypatch.setattr("app.api.routes.samples.presign_get_url", lambda **kw: f"/objects/{kw['key']}")
+    monkeypatch.setattr(
+        "app.api.routes.samples.download_object_to_file",
+        lambda **kw: Path(kw["file_path"]).write_bytes(stored[kw["key"]]),
+    )
+    response = client.post("/api/v1/samples/upload", data={
+        "image_id": str(image_id), "name": "uploaded-tiff", "category": "ship",
+        "annotation_id": "manual:uploaded-tiff", "image_format": "image/tiff", "width": 3, "height": 2,
+    }, files={
+        "image": ("sample.TIF", original, "image/tiff"),
+        "thumbnail": ("thumbnail.png", thumb.getvalue(), "image/png"),
+    })
+    assert response.status_code == 200
+    sample = response.json()["data"]
+    assert sample["roi"]["format"] == "image/tiff"
+    assert sample["roi"]["width"] == 3 and sample["roi"]["height"] == 2
+    assert sample["crop_storage_key"].endswith(".tif")
+    assert stored[sample["crop_storage_key"]] == original
+    assert stored[sample["thumb_storage_key"]].startswith(b"\x89PNG")
+    exported = client.get(f"/api/v1/samples/{sample['id']}/export?format=source")
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("image/tiff")
+    assert exported.content == original
+    with PILImage.open(io.BytesIO(exported.content)) as opened:
+        np.testing.assert_array_equal(np.asarray(opened), data)

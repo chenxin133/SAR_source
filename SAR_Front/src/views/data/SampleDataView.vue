@@ -115,6 +115,7 @@
           <el-upload
             ref="uploadRef"
             action="#"
+            :accept="SAMPLE_UPLOAD_ACCEPT"
             :auto-upload="false"
             :limit="1"
             :show-file-list="false"
@@ -125,7 +126,7 @@
           >
             <el-button type="primary">选择图片</el-button>
             <template #tip>
-              <div class="el-upload__tip">支持 .png / .jpg / .jpeg / .webp</div>
+              <div class="el-upload__tip">支持 .png / .jpg / .jpeg / .webp / .tif / .tiff</div>
             </template>
           </el-upload>
           <div v-if="uploadFileList.length" class="selected-file">
@@ -156,6 +157,7 @@ import type { SarImage } from '../../types/sar'
 import type { SarSample } from '../../types/samples'
 import { unpackImageDescription } from '../../utils/imageMetadata'
 import { buildPolarizationOptions } from '../../constants/polarizations'
+import { buildLocalSampleImage, isAllowedSampleFile, SAMPLE_UPLOAD_ACCEPT } from '../../utils/sampleUpload'
 
 const router = useRouter()
 const route = useRoute()
@@ -423,8 +425,6 @@ const uploadRules = {
   category: [{ required: true, message: '请输入类别', trigger: 'blur' }]
 } as const
 
-const allowedUploadExts = new Set(['png', 'jpg', 'jpeg', 'webp'])
-
 const resetUploadForm = () => {
   uploadForm.name = ''
   uploadForm.imageId = ''
@@ -444,11 +444,6 @@ const clearUploadFile = () => {
   uploadForm.file = null
 }
 
-const isAllowedUploadFile = (file: File) => {
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-  return allowedUploadExts.has(ext)
-}
-
 const handleUploadFileChange = (uploadFile: UploadFile, uploadFiles: UploadFiles) => {
   uploadFileList.value = uploadFiles as UploadUserFile[]
   const raw = uploadFile.raw ?? null
@@ -456,8 +451,8 @@ const handleUploadFileChange = (uploadFile: UploadFile, uploadFiles: UploadFiles
     uploadForm.file = null
     return
   }
-  if (!isAllowedUploadFile(raw)) {
-    ElMessage.error('仅支持 PNG/JPG/JPEG/WEBP 图片样本')
+  if (!isAllowedSampleFile(raw)) {
+    ElMessage.error('仅支持 PNG/JPG/JPEG/WEBP/TIF/TIFF 图片样本')
     clearUploadFile()
     return
   }
@@ -476,38 +471,8 @@ const handleUploadFileExceed = () => {
   ElMessage.warning('一次只能选择 1 个样本文件')
 }
 
-const canvasToBlob = (canvas: HTMLCanvasElement, type: SarSample['format'], quality?: number) => {
-  return new Promise<Blob>((resolve) => {
-    canvas.toBlob((blob) => resolve(blob ?? new Blob()), type, quality)
-  })
-}
-
-const downscaleCanvas = (src: HTMLCanvasElement, maxSize = 256) => {
-  const scale = Math.min(1, maxSize / Math.max(src.width, src.height))
-  const out = document.createElement('canvas')
-  out.width = Math.max(1, Math.round(src.width * scale))
-  out.height = Math.max(1, Math.round(src.height * scale))
-  const ctx = out.getContext('2d')
-  if (ctx) ctx.drawImage(src, 0, 0, out.width, out.height)
-  return out
-}
-
 const buildLocalSamplePayload = async (file: File) => {
-  const bitmap = await createImageBitmap(file)
-  const canvas = document.createElement('canvas')
-  canvas.width = bitmap.width
-  canvas.height = bitmap.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    bitmap.close()
-    throw new Error('无法创建样本画布')
-  }
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-  bitmap.close()
-
-  const format: SarSample['format'] = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png'
-  const imageBlob = format === 'image/jpeg' ? file : await canvasToBlob(canvas, 'image/png')
-  const thumbnail = await canvasToBlob(downscaleCanvas(canvas, 256), 'image/png')
+  const payload = await buildLocalSampleImage(file)
   const now = Date.now()
   const id = `sample-${now}-${Math.random().toString(36).slice(2, 8)}`
   const sourceImage = imageMetaById.value.get(uploadForm.imageId)
@@ -520,11 +485,7 @@ const buildLocalSamplePayload = async (file: File) => {
     annotationType: uploadForm.annotationType,
     category: uploadForm.category.trim(),
     remark: uploadForm.remark.trim(),
-    format,
-    width: canvas.width,
-    height: canvas.height,
-    image: imageBlob,
-    thumbnail,
+    ...payload,
     createdAt: now,
     updatedAt: now
   } satisfies SarSample

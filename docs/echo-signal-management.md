@@ -54,6 +54,8 @@ python scripts/generate_echo.py F:\SAR_desktop_packaging_workspace\artifacts\ech
 
 首次升级时，新目录为空会从原用户目录 `sar-desktop-shell/runtime/backend/data` 复制完整数据，逐文件 SHA-256 校验后启用，保留原目录作为备份。已有目标数据库不会被覆盖。日志仍在用户配置目录下的 `sar-desktop-shell/logs`。Windows 新安装器在升级和卸载时保留 `data`；不要用旧安装器覆盖已迁移的数据。资源热更新不会更新 Electron 壳的数据目录逻辑，需安装新版完整安装包。Linux `/opt` 安装需管理员为使用者授予安装目录写权限，包管理器升级前请备份数据。详细路径及迁移规则见打包仓库 `docs/storage-and-package-size.md`。个人数据不提交 Git，也不进入安装包。
 
+样本管理的本地上传同时支持 PNG、JPG/JPEG、WEBP、TIF/TIFF（含大写扩展名）。TIFF 原文件及其数值精度保留，预览单独生成 PNG；“原格式”导出返回上传原文件。样本文件位于 `data/storage/sar/samples`，回波文件位于 `data/storage/sar/echoes`，标注及管理记录位于 `data/sar.db`。
+
 ## API
 
 路径前缀 `/api/v1/echoes`，遵循现有 X-Project-Id 项目选择机制：

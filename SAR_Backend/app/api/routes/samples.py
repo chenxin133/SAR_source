@@ -431,6 +431,11 @@ def export_sample(
     settings = get_settings()
     source_type = str((s.roi or {}).get("format") or "application/octet-stream")
     if format.strip().lower() == "source":
+        if str((s.roi or {}).get("annotationId") or "").startswith("manual:"):
+            with tempfile.TemporaryDirectory() as tmp:
+                original_path = os.path.join(tmp, Path(s.crop_storage_key).name)
+                download_object_to_file(bucket=settings.s3_bucket, key=s.crop_storage_key, file_path=original_path)
+                return Response(content=Path(original_path).read_bytes(), media_type=source_type)
         source_image = _resolve_source_image(db, project, s)
         geometry = _resolve_sample_geometry(db, project, s)
         if source_image is not None and geometry is not None:
