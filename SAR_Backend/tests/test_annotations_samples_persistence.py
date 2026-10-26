@@ -329,3 +329,30 @@ def test_old_sample_relinks_to_reuploaded_image_by_name(client, db_session, monk
     response = client.get(f"/api/v1/samples/{sample_id}/export?format=source")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/tiff")
+
+
+def test_crop_png_source_to_tiff_uses_png_reader(client, db_session, monkeypatch, tmp_path):
+    image_id = _create_image(db_session)
+    image = db_session.query(Image).filter(Image.id == image_id).one()
+    image.name = image.original_filename = "source.png"
+    image.mime_type = "image/png"
+    db_session.commit()
+    source_path = tmp_path / "source.png"
+    PILImage.new("RGB", (100, 80), (40, 80, 120)).save(source_path)
+    stored = {}
+    monkeypatch.setattr("app.api.routes.samples.download_object_to_file", lambda **kw: shutil.copy2(source_path, kw["file_path"]))
+    monkeypatch.setattr("app.api.routes.samples.put_file", lambda **kw: stored.__setitem__(kw["key"], Path(kw["file_path"]).read_bytes()))
+    monkeypatch.setattr("app.api.routes.samples.presign_get_url", lambda **kw: f"/objects/{kw['key']}")
+    response = client.post("/api/v1/samples/crop", json={
+        "image_id": str(image_id), "name": "png-to-tiff", "annotation_id": "ANN_PNG_TIFF",
+        "output_format": "image/tiff", "coordinate_width": 100, "coordinate_height": 80,
+        "polygon": [{"x": 10, "y": 15}, {"x": 70, "y": 15}, {"x": 70, "y": 65}, {"x": 10, "y": 65}],
+    })
+    assert response.status_code == 200
+    sample = response.json()["data"]
+    output = tmp_path / "crop.tif"
+    output.write_bytes(stored[sample["crop_storage_key"]])
+    with PILImage.open(output) as crop:
+        assert crop.format == "TIFF"
+        assert crop.size == (60, 50)
+        assert crop.getpixel((20, 20)) == (40, 80, 120)

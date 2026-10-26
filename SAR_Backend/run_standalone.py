@@ -31,8 +31,9 @@ def main() -> None:
     # Ensure PyInstaller onedir runtime can import local package `app`.
     if str(base) not in sys.path:
         sys.path.insert(0, str(base))
-    (base / "data").mkdir(parents=True, exist_ok=True)
     _set_defaults(base)
+    sys.dont_write_bytecode = True
+    Path(os.environ["LOCAL_DATA_DIR"]).mkdir(parents=True, exist_ok=True)
     port = int(os.environ.get("SAR_BACKEND_PORT", "8000"))
     uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=False)
 

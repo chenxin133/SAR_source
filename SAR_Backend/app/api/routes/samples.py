@@ -227,7 +227,10 @@ def _render_source_crop(
         # This file is an already-ingested project image. Use the TIFF-specific
         # reader so very large rasters are not rejected by Pillow's global
         # decompression-bomb threshold before the small crop is decoded.
-        if content_type == "image/tiff":
+        source_type, _, _ = _source_output_format(
+            source_image.mime_type, source_image.original_filename or source_image.name, "source"
+        )
+        if source_type == "image/tiff":
             opened = TiffImagePlugin.TiffImageFile(source_path)
         else:
             opened = PILImage.open(source_path)

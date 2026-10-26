@@ -1302,8 +1302,8 @@ let panLast = { x: 0, y: 0 }
 let isSpaceDown = false
 
 let isDrawingRect = false
-let rectStartImage = { x: 0, y: 0 }
-let rectEndImage = { x: 0, y: 0 }
+let rectStartScene = { x: 0, y: 0 }
+let rectEndScene = { x: 0, y: 0 }
 let drawingRect: Rect | null = null
 
 let polyPoints: XY[] = []
@@ -1547,16 +1547,16 @@ const bindCanvasEvents = () => {
     if (!currentImageId.value || !bgObject) return
     if (tool.value === 'rect') {
       isDrawingRect = true
-      const p0Scene = getScenePoint(e)
-      rectStartImage = scenePointToImagePoint(p0Scene)
-      rectEndImage = { ...rectStartImage }
+      // Draw in scene coordinates so image rotation does not tilt a new rectangle.
+      rectStartScene = getScenePoint(e)
+      rectEndScene = { ...rectStartScene }
       const abs = [
-        { x: rectStartImage.x, y: rectStartImage.y },
-        { x: rectStartImage.x, y: rectStartImage.y },
-        { x: rectStartImage.x, y: rectStartImage.y },
-        { x: rectStartImage.x, y: rectStartImage.y }
+        { x: rectStartScene.x, y: rectStartScene.y },
+        { x: rectStartScene.x, y: rectStartScene.y },
+        { x: rectStartScene.x, y: rectStartScene.y },
+        { x: rectStartScene.x, y: rectStartScene.y }
       ]
-      drawingRect = buildRectObjectFromAbs(imagePointsToScenePoints(abs), {
+      drawingRect = buildRectObjectFromAbs(abs, {
         fill: 'rgba(64,158,255,0.18)',
         stroke: '#409EFF',
         strokeWidth: 2,
@@ -1620,18 +1620,18 @@ const bindCanvasEvents = () => {
       return
     }
     if (tool.value === 'rect' && isDrawingRect && drawingRect) {
-      rectEndImage = scenePointToImagePoint(getScenePoint(e))
-      const x0 = Math.min(rectStartImage.x, rectEndImage.x)
-      const y0 = Math.min(rectStartImage.y, rectEndImage.y)
-      const x1 = Math.max(rectStartImage.x, rectEndImage.x)
-      const y1 = Math.max(rectStartImage.y, rectEndImage.y)
+      rectEndScene = getScenePoint(e)
+      const x0 = Math.min(rectStartScene.x, rectEndScene.x)
+      const y0 = Math.min(rectStartScene.y, rectEndScene.y)
+      const x1 = Math.max(rectStartScene.x, rectEndScene.x)
+      const y1 = Math.max(rectStartScene.y, rectEndScene.y)
       const abs = [
         { x: x0, y: y0 },
         { x: x1, y: y0 },
         { x: x1, y: y1 },
         { x: x0, y: y1 }
       ]
-      setRectAbsPoints(drawingRect, imagePointsToScenePoints(abs))
+      setRectAbsPoints(drawingRect, abs)
       canvas.requestRenderAll()
       return
     }
@@ -1656,8 +1656,8 @@ const bindCanvasEvents = () => {
       const r = drawingRect
       isDrawingRect = false
       drawingRect = null
-      const vw = Math.abs(rectEndImage.x - rectStartImage.x)
-      const vh = Math.abs(rectEndImage.y - rectStartImage.y)
+      const vw = Math.abs(rectEndScene.x - rectStartScene.x)
+      const vh = Math.abs(rectEndScene.y - rectStartScene.y)
       if (vw < 3 || vh < 3) {
         canvas.remove(r)
         canvas.requestRenderAll()

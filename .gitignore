@@ -34,3 +34,25 @@ reports/*.txt
 # OS/editor files
 .DS_Store
 Thumbs.db
+
+# Local reports, authoring outputs and build environments
+/output/
+/reports/
+/docs/*.docx
+/docs/*.pdf
+/docs/screenshots/
+**/.venv/
+**/venv/
+*.db-wal
+*.db-shm
+.env
+.env.local
+# Downloaded reference page (not application source)
+/SAR_Front/article_157952926.html
+
+# Local radar data files
+*.dat
+*.tif
+*.tiff
+*.npy
+*.npz
