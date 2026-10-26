@@ -50,7 +50,9 @@ python scripts/generate_echo.py F:\SAR_desktop_packaging_workspace\artifacts\ech
 
 新表 `echo_signals` 保存元数据；dat 与 PNG 位于 `echoes/<project-id>/<echo-id>/`。SQLite 桌面版启动时自动创建新表。PostgreSQL 在后端目录执行 `alembic upgrade head`，迁移为 `20261023_0007`。
 
-Ubuntu 默认运行数据：`/home/gf/.config/sar-desktop-shell/runtime/backend/data`；日志：`/home/gf/.config/sar-desktop-shell/logs`。安装目录 `/opt/SAR Desktop` 存放程序资源。升级前退出程序并备份运行数据，不要提交个人数据库或对象存储。
+新版 Electron 桌面壳将业务数据保存在软件目录下的 `data`，包含 `sar.db`、`storage` 与未完成上传分片。Windows 当前路径为 `E:\GF\Desktop\SAR Desktop\data`；Ubuntu 安装版为 `/opt/SAR Desktop/data`；Windows portable 和 Linux AppImage 使用启动文件旁的 `data`。软件目录必须可写。退出软件后复制整个程序文件夹即可在同系统迁移数据；跨系统需换用对应系统程序并复制 `data`。
+
+首次升级时，新目录为空会从原用户目录 `sar-desktop-shell/runtime/backend/data` 复制完整数据，逐文件 SHA-256 校验后启用，保留原目录作为备份。已有目标数据库不会被覆盖。日志仍在用户配置目录下的 `sar-desktop-shell/logs`。Windows 新安装器在升级和卸载时保留 `data`；不要用旧安装器覆盖已迁移的数据。资源热更新不会更新 Electron 壳的数据目录逻辑，需安装新版完整安装包。Linux `/opt` 安装需管理员为使用者授予安装目录写权限，包管理器升级前请备份数据。详细路径及迁移规则见打包仓库 `docs/storage-and-package-size.md`。个人数据不提交 Git，也不进入安装包。
 
 ## API
 
