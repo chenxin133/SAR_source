@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import pytest
+from botocore.exceptions import ClientError
 from PIL import Image as PILImage, TiffImagePlugin
 
 from app.config import get_settings
@@ -45,6 +47,34 @@ def test_upsert_shared_annotations(client, db_session):
     rows = client.get(f"/api/v1/annotations?image_id={image_id}")
     assert rows.status_code == 200
     assert rows.json()["data"][0]["payload"]["annotations"][0]["id"] == "ANN_1"
+
+
+@pytest.mark.parametrize("missing_backend", ["local", "NoSuchKey", "404", "NotFound"])
+def test_crop_missing_original_keeps_annotations_and_samples(client, db_session, monkeypatch, tmp_path, missing_backend):
+    image_id = _create_image(db_session)
+    annotation = {"id": "ANN_MISSING", "type": "rect", "rect": {"x": 2, "y": 1, "w": 3, "h": 3}}
+    payload = {"version": 1, "imageId": str(image_id), "exportedAt": 1, "annotations": [annotation]}
+    assert client.put(f"/api/v1/annotations/image/{image_id}", json=payload).status_code == 200
+    before = db_session.query(Sample).count()
+    settings = get_settings()
+    settings.local_storage_dir = str(tmp_path / "storage")
+    settings.storage_backend = "local" if missing_backend == "local" else "s3"
+    if missing_backend != "local":
+        def missing_object(**_kwargs):
+            raise ClientError({"Error": {"Code": missing_backend, "Message": "missing"}}, "GetObject")
+        monkeypatch.setattr("app.api.routes.samples.download_object_to_file", missing_object)
+
+    response = client.post("/api/v1/samples/crop", json={
+        "image_id": str(image_id), "name": "missing-source", "annotation_id": "ANN_MISSING",
+        "output_format": "source", "coordinate_width": 100, "coordinate_height": 80,
+        "polygon": [{"x": 2, "y": 1}, {"x": 5, "y": 1}, {"x": 5, "y": 4}, {"x": 2, "y": 4}],
+    })
+    assert response.status_code == 409
+    assert "原始影像文件缺失" in response.json()["detail"]
+    assert "shared.tif" in response.json()["detail"]
+    assert db_session.query(Sample).count() == before
+    saved = client.get(f"/api/v1/annotations?image_id={image_id}").json()["data"]
+    assert saved[0]["payload"]["annotations"] == [annotation]
 
 
 def test_upload_and_delete_shared_sample(client, db_session, monkeypatch):

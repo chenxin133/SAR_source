@@ -8,6 +8,7 @@ import gc
 from pathlib import Path
 
 import numpy as np
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from PIL import Image as PILImage, ImageDraw, TiffImagePlugin
 from sqlalchemy import select
@@ -223,7 +224,20 @@ def _render_source_crop(
         if local_source is not None and local_source.is_file():
             source_path = str(local_source)
         else:
-            download_object_to_file(bucket=settings.s3_bucket, key=source_image.storage_key, file_path=source_path)
+            try:
+                download_object_to_file(bucket=settings.s3_bucket, key=source_image.storage_key, file_path=source_path)
+            except (FileNotFoundError, ClientError) as exc:
+                if isinstance(exc, ClientError) and exc.response.get("Error", {}).get("Code") not in {
+                    "NoSuchKey", "404", "NotFound"
+                }:
+                    raise
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"原始影像文件缺失：{source_image.original_filename or source_image.name}。"
+                        "预览图仍可用于标注，但生成样本需要原文件；请恢复该影像的原文件后重试。"
+                    ),
+                ) from exc
         # This file is an already-ingested project image. Use the TIFF-specific
         # reader so very large rasters are not rejected by Pillow's global
         # decompression-bomb threshold before the small crop is decoded.

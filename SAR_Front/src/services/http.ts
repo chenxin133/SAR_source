@@ -35,7 +35,13 @@ export const requestJson = async <T>(pathOrUrl: string, init?: RequestInit): Pro
     const text = await resp.text().catch(() => '')
     const trimmed = text.trim()
     const isHtml = trimmed.startsWith('<') || /<!doctype/i.test(trimmed)
-    const message = isHtml ? `HTTP ${resp.status}` : (trimmed || `HTTP ${resp.status}`)
+    let message = isHtml ? `HTTP ${resp.status}` : (trimmed || `HTTP ${resp.status}`)
+    if (!isHtml && trimmed.startsWith('{')) {
+      try {
+        const payload = JSON.parse(trimmed)
+        if (typeof payload?.detail === 'string' && payload.detail.trim()) message = payload.detail
+      } catch { /* Keep plain text errors readable. */ }
+    }
     throw new HttpError(message, resp.status, url)
   }
 
