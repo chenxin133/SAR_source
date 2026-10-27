@@ -273,6 +273,12 @@ def _to_uint8_rgb(arr: np.ndarray) -> np.ndarray:
         g = _to_uint8_gray(arr)
         return np.stack([g, g, g], axis=-1)
 
+    if arr.ndim == 3 and arr.shape[0] in (1, 2):
+        # Two-sample TIFFs need not be RGB or I/Q. Preview the first band
+        # without changing either band in the stored original.
+        g = _to_uint8_gray(arr[0, :, :])
+        return np.stack([g, g, g], axis=-1)
+
     if arr.ndim == 3 and arr.shape[0] >= 3:
         rgb = arr[:3, :, :]
         if np.iscomplexobj(rgb):
@@ -282,10 +288,6 @@ def _to_uint8_rgb(arr: np.ndarray) -> np.ndarray:
         for i in range(3):
             out[:, :, i] = _to_uint8_gray(rgb[i, :, :])
         return out
-
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        g = _to_uint8_gray(arr[0, :, :])
-        return np.stack([g, g, g], axis=-1)
 
     raise RuntimeError("Unsupported raster shape")
 

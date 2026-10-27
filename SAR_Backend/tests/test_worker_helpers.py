@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import uuid
 
 from app import config as app_config
@@ -42,6 +43,32 @@ def test_to_uint8_rgb_from_three_bands():
     rgb = tasks._to_uint8_rgb(x)
     assert rgb.shape == (4, 4, 3)
     assert rgb.dtype == np.uint8
+
+
+@pytest.mark.parametrize("planarconfig", ["contig", "separate"])
+@pytest.mark.parametrize("compressed", [False, True])
+def test_two_sample_tiff_preview_without_gdal(tmp_path, monkeypatch, planarconfig, compressed):
+    import tifffile
+
+    first = np.arange(9 * 13, dtype=np.uint16).reshape(9, 13)
+    second = np.full_like(first, 65535)
+    axis = -1 if planarconfig == "contig" else 0
+    raster = np.stack([first, second], axis=axis)
+    path = tmp_path / "two-sample.tif"
+    tifffile.imwrite(path, raster, photometric="minisblack", planarconfig=planarconfig,
+                     extrasamples=["unspecified"], compression="deflate" if compressed else None)
+    original = path.read_bytes()
+    def no_gdal(*_args, **_kwargs):
+        raise RuntimeError("GDAL not available")
+    monkeypatch.setattr(tasks, "_read_preview_with_gdal", no_gdal)
+    rgb = tasks._build_preview_rgb(str(path), max_size=20)
+    assert rgb.shape == (9, 13, 3)
+    for channel in range(3):
+        np.testing.assert_array_equal(rgb[:, :, channel], tasks._to_uint8_gray(first))
+    small = tasks._build_preview_rgb(str(path), max_size=5)
+    assert max(small.shape[:2]) <= 5
+    assert tasks._read_source_dimensions(str(path)) == (13, 9)
+    assert path.read_bytes() == original
 
 
 def test_build_preview_rgb_falls_back_without_gdal(monkeypatch):

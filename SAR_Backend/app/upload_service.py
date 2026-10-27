@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import uuid
@@ -17,6 +18,7 @@ def init_upload(*, filename: str, total_size: int) -> dict:
     upload_id = uuid.uuid4()
     d = _upload_dir(upload_id)
     d.mkdir(parents=True, exist_ok=True)
+    (d / "upload.json").write_text(json.dumps({"filename": filename}, ensure_ascii=False), encoding="utf-8")
     settings = get_settings()
     return {
         "upload_id": str(upload_id),
@@ -24,6 +26,14 @@ def init_upload(*, filename: str, total_size: int) -> dict:
         "filename": filename,
         "total_size": total_size,
     }
+
+
+def get_upload_filename(upload_id: uuid.UUID) -> str | None:
+    try:
+        info = json.loads((_upload_dir(upload_id) / "upload.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None  # Uploads started before filename metadata was introduced.
+    return str(info["filename"])
 
 
 def write_part(*, upload_id: uuid.UUID, part_no: int, data: bytes) -> int:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import mimetypes
+import logging
 import os
 import tempfile
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -37,11 +38,12 @@ from app.storage import (
     read_object_bytes,
     use_local_storage,
 )
-from app.upload_service import assemble, cleanup, init_upload, write_part
+from app.upload_service import assemble, cleanup, get_upload_filename, init_upload, write_part
 from app.workers.client import enqueue_process_image
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _region_to_rgb(crop: PILImage.Image) -> PILImage.Image:
@@ -228,17 +230,30 @@ def upload_complete(
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    name = payload.name or os.path.basename(assembled_path)
+    original_filename = PureWindowsPath(get_upload_filename(upload_id) or payload.name or "source.bin").name
+    name = payload.name or original_filename
     image_id = uuid.uuid4()
-    storage_key = f"raw/{image_id}/{name}"
-    mime_type = payload.mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
-    put_file(bucket=settings.s3_bucket, key=storage_key, file_path=assembled_path, content_type=mime_type)
+    suffix = Path(original_filename).suffix.lower()
+    if not suffix or len(suffix) > 10 or not suffix[1:].isalnum():
+        suffix = ".bin"
+    # Display names can contain Windows path characters or be very long.
+    # Keep the original filename as metadata and use a short storage leaf.
+    storage_key = f"raw/{image_id}/source{suffix}"
+    mime_type = payload.mime_type or mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
+    try:
+        put_file(bucket=settings.s3_bucket, key=storage_key, file_path=assembled_path, content_type=mime_type)
+    except OSError as exc:
+        logger.exception("Cannot store upload %s: key=%s storage_dir=%s", upload_id, storage_key, settings.local_storage_dir)
+        raise HTTPException(
+            status_code=500,
+            detail="上传文件无法写入数据目录，请检查目录是否存在、路径长度、磁盘空间和写入权限后重试。上传分片已保留。",
+        ) from exc
 
     image = Image(
         id=image_id,
         project_id=project.id,
         name=name,
-        original_filename=name,
+        original_filename=original_filename,
         mime_type=mime_type,
         satellite=payload.satellite,
         acquisition_at=payload.acquisition_at,
