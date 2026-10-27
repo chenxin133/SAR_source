@@ -7,7 +7,7 @@ export const entrySatellites: SatelliteEntry[] = [
   { id: 'qilu-1', name: '齐鲁一号' },
   { id: 'taijing-4-03', name: '泰景四号03星' },
   { id: 'hongtu-1', name: '航天宏图一号' },
-  { id: 'luojia-1-01', name: '珞珈一号01星' },
+  { id: 'luojia-1-01', name: '珞珈二号' },
   { id: 'haisi-1', name: '海丝一号' },
   { id: 'chaohu-1', name: '巢湖一号' },
   { id: 'fucheng-1', name: '涪城一号' }
