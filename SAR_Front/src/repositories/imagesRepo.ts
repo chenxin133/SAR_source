@@ -173,10 +173,18 @@ export const imagesRepo = {
     return rows.map((img) => mapApiImageToSarImage(img))
   },
 
-  async create(payload: UploadPayload, onProgress?: (percent: number) => void): Promise<SarImage> {
+  async create(
+    payload: UploadPayload,
+    onProgress?: (percent: number) => void,
+    onStage?: (stage: string) => void
+  ): Promise<SarImage> {
     const mode = getStorageMode()
-    if (mode === 'local') return await rawImagesRepo.create(payload, onProgress)
+    if (mode === 'local') {
+      onStage?.('正在导入影像并生成预览')
+      return await rawImagesRepo.create(payload, onProgress)
+    }
 
+    onStage?.('正在传输原始影像')
     const file = payload.file
     const init = await imagesApi.uploadInit({ filename: file.name, total_size: file.size })
     const partSize = Math.max(1, Number(init.part_size))
@@ -198,6 +206,7 @@ export const imagesRepo = {
       setP(p01)
     }
 
+    onStage?.('正在校验并保存原始影像')
     const completed = await imagesApi.uploadComplete({
       upload_id: init.upload_id,
       total_parts: totalParts,
@@ -212,6 +221,7 @@ export const imagesRepo = {
     })
 
     // 触发后端处理任务（70% ~ 100%）
+    onStage?.('正在生成影像预览')
     const { task_id } = await imagesApi.process(completed.image_id)
     const msg = await waitTask(task_id, {
       timeoutMs: 5 * 60_000,

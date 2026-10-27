@@ -9,6 +9,7 @@ export const useRawDataStore = defineStore('rawData', () => {
   const images = ref<SarImage[]>([])
   const loading = ref(false)
   const uploadProgress = ref(0)
+  const uploadStage = ref('')
   const isUploading = ref(false)
 
   const fetchImages = async () => {
@@ -28,9 +29,11 @@ export const useRawDataStore = defineStore('rawData', () => {
     isUploading.value = true
     uploadProgress.value = 0
     try {
-      const newImage = await imagesRepo.create(payload, (percent) => {
-        uploadProgress.value = percent
-      })
+      const newImage = await imagesRepo.create(
+        payload,
+        (percent) => { uploadProgress.value = percent },
+        (stage) => { uploadStage.value = stage }
+      )
 
       images.value.unshift(newImage)
       ElMessage.success('上传成功')
@@ -49,6 +52,7 @@ export const useRawDataStore = defineStore('rawData', () => {
     } finally {
       isUploading.value = false
       uploadProgress.value = 0
+      uploadStage.value = ''
     }
   }
 
@@ -71,6 +75,7 @@ export const useRawDataStore = defineStore('rawData', () => {
     images,
     loading,
     uploadProgress,
+    uploadStage,
     isUploading,
     fetchImages,
     uploadImage,

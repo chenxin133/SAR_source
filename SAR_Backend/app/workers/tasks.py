@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import os
 import shutil
 import tempfile
@@ -17,8 +18,11 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Annotation, Image, Sample, Thumbnail, Task
-from app.storage import download_object_to_file, put_file
+from app.storage import download_object_to_file, local_object_path, put_file, use_local_storage
 from app.workers.celery_app import celery_app
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def _levels() -> list[int]:
@@ -198,7 +202,7 @@ def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
         raise RuntimeError("tifffile not available") from e
 
     try:
-        arr = tifffile.memmap(path)
+        arr = tifffile.memmap(path, mode="r")
     except Exception:
         with tifffile.TiffFile(path) as tif:
             if tif.series:
@@ -357,11 +361,12 @@ def _save_webp(rgb_u8: np.ndarray, out_path: str, quality: int):
     from PIL import Image as PILImage
 
     img = PILImage.fromarray(rgb_u8, mode="RGB")
-    img.save(out_path, format="WEBP", quality=int(quality), method=6)
+    img.save(out_path, format="WEBP", quality=int(quality), method=4)
 
 
 @celery_app.task(bind=True, name="app.workers.tasks.process_image", acks_late=True)
 def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str):
+    started_at = time.perf_counter()
     settings = get_settings()
     task_uuid = uuid.UUID(task_id)
     image_uuid = uuid.UUID(image_id)
@@ -382,19 +387,25 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
 
         tmp = tempfile.mkdtemp()
         try:
-            local_path = os.path.join(tmp, "raw.tif")
-            download_object_to_file(bucket=bucket, key=img.storage_key, file_path=local_path)
+            if use_local_storage():
+                local_path = str(local_object_path(bucket=bucket, key=img.storage_key))
+            else:
+                local_path = os.path.join(tmp, "raw.tif")
+                download_object_to_file(bucket=bucket, key=img.storage_key, file_path=local_path)
             source_width, source_height = _read_source_dimensions(local_path)
             img.width = source_width
             img.height = source_height
             db.commit()
 
             produced: dict[str, str] = {}
+            preview_started_at = time.perf_counter()
+            _update_task(db=db, task_id=task_uuid, status="processing", progress=5)
+            master_rgb = _build_preview_rgb(local_path, max_size=max(levels))
             for idx, level in enumerate(levels):
                 p = 5 + (idx / max(1, len(levels))) * 80
                 _update_task(db=db, task_id=task_uuid, status="processing", progress=p)
 
-                rgb = _build_preview_rgb(local_path, max_size=level)
+                rgb = _resize_rgb(master_rgb, max_size=level)
                 out_path = os.path.join(tmp, f"preview_{level}.webp")
                 _save_webp(rgb, out_path, quality=quality)
 
@@ -437,6 +448,11 @@ def process_image(self: CeleryTask, task_id: str, project_id: str, image_id: str
             img.updated_at = datetime.utcnow()
             db.commit()
             _update_task(db=db, task_id=task_uuid, status="succeeded", progress=100, result={"thumbnails": produced})
+            logger.info(
+                "preview_timing image_id=%s source_seconds=%.3f preview_seconds=%.3f total_seconds=%.3f",
+                image_id, preview_started_at - started_at,
+                time.perf_counter() - preview_started_at, time.perf_counter() - started_at,
+            )
             return {"ok": True, "thumbnails": produced}
         finally:
             _cleanup_temp_dir(tmp)

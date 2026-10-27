@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import mimetypes
+import errno
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,10 +112,21 @@ def ensure_bucket_exists(bucket: str) -> None:
     s3.create_bucket(Bucket=bucket)
 
 
-def put_file(*, bucket: str, key: str, file_path: str, content_type: str | None = None) -> PutObjectResult:
+def put_file(
+    *, bucket: str, key: str, file_path: str, content_type: str | None = None, consume_source: bool = False
+) -> PutObjectResult:
     if use_local_storage():
         dst = local_object_path(bucket=bucket, key=key)
         dst.parent.mkdir(parents=True, exist_ok=True)
+        if consume_source:
+            try:
+                # Only upload-owned assembled files opt in. Same-volume rename
+                # avoids copying multi-GB originals after chunk assembly.
+                os.replace(file_path, dst)
+                return PutObjectResult(bucket=bucket, key=key)
+            except OSError as exc:
+                if exc.errno != errno.EXDEV and getattr(exc, "winerror", None) != 17:
+                    raise
         shutil.copy2(file_path, dst)
         return PutObjectResult(bucket=bucket, key=key)
     s3 = get_s3_client()

@@ -88,6 +88,7 @@
       </el-form-item>
 
       <div v-if="store.isUploading" class="progress-bar">
+        <div class="upload-stage" role="status">{{ store.uploadStage }}</div>
         <el-progress :percentage="store.uploadProgress" />
       </div>
     </el-form>
@@ -329,6 +330,12 @@ const handleClosed = () => {
 <style scoped>
 .progress-bar {
   margin-top: 10px;
+}
+
+.upload-stage {
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
 }
 
 .selected-file {

@@ -4,6 +4,7 @@ import mimetypes
 import logging
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path, PureWindowsPath
 
@@ -43,7 +44,7 @@ from app.workers.client import enqueue_process_image
 
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 def _region_to_rgb(crop: PILImage.Image) -> PILImage.Image:
@@ -225,11 +226,13 @@ def upload_complete(
     if payload.total_parts <= 0:
         raise HTTPException(status_code=400, detail="Invalid total_parts")
 
+    assemble_started = time.perf_counter()
     try:
         assembled_path, sha256, size_bytes = assemble(upload_id=upload_id, total_parts=payload.total_parts)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    assembled_at = time.perf_counter()
     original_filename = PureWindowsPath(get_upload_filename(upload_id) or payload.name or "source.bin").name
     name = payload.name or original_filename
     image_id = uuid.uuid4()
@@ -241,7 +244,10 @@ def upload_complete(
     storage_key = f"raw/{image_id}/source{suffix}"
     mime_type = payload.mime_type or mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
     try:
-        put_file(bucket=settings.s3_bucket, key=storage_key, file_path=assembled_path, content_type=mime_type)
+        put_file(
+            bucket=settings.s3_bucket, key=storage_key, file_path=assembled_path,
+            content_type=mime_type, consume_source=True,
+        )
     except OSError as exc:
         logger.exception("Cannot store upload %s: key=%s storage_dir=%s", upload_id, storage_key, settings.local_storage_dir)
         raise HTTPException(
@@ -249,6 +255,7 @@ def upload_complete(
             detail="上传文件无法写入数据目录，请检查目录是否存在、路径长度、磁盘空间和写入权限后重试。上传分片已保留。",
         ) from exc
 
+    stored_at = time.perf_counter()
     image = Image(
         id=image_id,
         project_id=project.id,
@@ -270,6 +277,10 @@ def upload_complete(
     db.commit()
 
     cleanup(upload_id)
+    logger.info(
+        "upload_timing upload_id=%s bytes=%s assemble_seconds=%.3f store_seconds=%.3f",
+        upload_id, size_bytes, assembled_at - assemble_started, stored_at - assembled_at,
+    )
     return Envelope(
         data=UploadCompleteResponse(image_id=image_id),
         request_id=getattr(request.state, "request_id", None),
