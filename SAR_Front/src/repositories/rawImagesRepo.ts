@@ -210,6 +210,13 @@ const buildPreviewAndThumbnail = async (file: File): Promise<{ preview?: Blob; t
 }
 
 export const rawImagesRepo = {
+  async update(id: string, patch: import('../types/sar').ImageMetadataPatch) {
+    const record = await store.get(id)
+    if (!record) throw new Error('影像不存在')
+    record.metadata = { ...record.metadata, ...patch }
+    await store.put(record)
+    return patch
+  },
   async list(): Promise<SarImage[]> {
     const records = await store.getAll()
     records.sort((a, b) => b.createdAt - a.createdAt)
@@ -236,6 +243,7 @@ export const rawImagesRepo = {
       satellite: payload.satellite,
       acquisitionDate: payload.acquisitionAt || '',
       fileSize: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
+      sizeBytes: file.size,
       resolution: payload.resolution || '',
       frequencyBand: payload.frequencyBand || '',
       polarization: payload.polarization || '',

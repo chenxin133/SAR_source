@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { SarImage, UploadPayload } from '../types/sar'
+import type { ImageMetadataPatch, SarImage, UploadPayload } from '../types/sar'
 import { ElMessage } from 'element-plus'
 import { imagesRepo } from '../repositories/imagesRepo'
 import { getStorageMode } from '../config/storage'
@@ -71,6 +71,14 @@ export const useRawDataStore = defineStore('rawData', () => {
     return await imagesRepo.getFile(id)
   }
 
+  const updateImage = async (id: string, patch: ImageMetadataPatch) => {
+    const saved = await imagesRepo.update(id, patch)
+    const image = images.value.find((item) => item.id === id)
+    if (!image) throw new Error('影像不存在，请刷新列表')
+    Object.assign(image, saved)
+    return image
+  }
+
   return {
     images,
     loading,
@@ -80,6 +88,7 @@ export const useRawDataStore = defineStore('rawData', () => {
     fetchImages,
     uploadImage,
     deleteImage,
+    updateImage,
     getFileBlob
   }
 })

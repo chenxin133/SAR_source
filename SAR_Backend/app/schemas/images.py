@@ -2,8 +2,31 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ImageUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    satellite: str | None = None
+    acquisition_at: datetime | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    resolution: str | None = None
+    frequency_band: str | None = None
+    polarization: str | None = None
+    description: str | None = None
+    status: Literal["uploaded", "processing", "ready", "failed"] | None = None
+    error_message: str | None = None
+
+    @field_validator("name", "size_bytes", "status")
+    @classmethod
+    def require_value(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError("此字段不能为空")
+        return value.strip() if isinstance(value, str) else value
 
 
 class ImageOut(BaseModel):

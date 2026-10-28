@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 
 class SampleCreateRequest(BaseModel):
-    image_id: uuid.UUID
+    image_id: uuid.UUID | None = None
     name: str | None = None
     category: str | None = None
     remark: str | None = None
@@ -32,7 +32,7 @@ class SampleCropRequest(BaseModel):
 
 class SampleOut(BaseModel):
     id: uuid.UUID
-    image_id: uuid.UUID
+    image_id: uuid.UUID | None = None
     name: str | None = None
     category: str | None = None
     remark: str | None = None

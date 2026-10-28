@@ -6,6 +6,7 @@ import os
 import tempfile
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 import numpy as np
@@ -23,6 +24,7 @@ from app.schemas.common import Envelope
 from app.schemas.images import (
     ImageDetailOut,
     ImageOut,
+    ImageUpdateRequest,
     ThumbnailOut,
     UploadCompleteRequest,
     UploadCompleteResponse,
@@ -158,6 +160,26 @@ def get_image(
         thumbnails=thumb_out,
     )
     return Envelope(data=out, request_id=getattr(request.state, "request_id", None))
+
+
+@router.patch("/{image_id}", response_model=Envelope[ImageDetailOut])
+def update_image(
+    image_id: uuid.UUID,
+    payload: ImageUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    project: Project = Depends(get_project),
+):
+    image = db.scalar(select(Image).where(Image.project_id == project.id, Image.id == image_id))
+    if image is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(image, field, value)
+    if changes:
+        image.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    return get_image(image_id, request, db, project)
 
 
 @router.delete("/{image_id}", response_model=Envelope[dict])

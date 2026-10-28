@@ -1,4 +1,4 @@
-import type { SarImage, UploadPayload } from '../types/sar'
+import type { ImageMetadataPatch, SarImage, UploadPayload } from '../types/sar'
 import { getStorageMode } from '../config/storage'
 import { rawImagesRepo } from './rawImagesRepo'
 import { imagesApi } from '../services/imagesApi'
@@ -37,6 +37,7 @@ const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): Sa
     satellite: String(img.satellite ?? ''),
     acquisitionDate: String(img.acquisition_at ?? ''),
     fileSize: formatBytes(Number(img.size_bytes ?? 0)),
+    sizeBytes: Number(img.size_bytes ?? 0),
     resolution: String(img.resolution ?? ''),
     frequencyBand: String(img.frequency_band ?? ''),
     polarization: String(img.polarization ?? ''),
@@ -163,6 +164,23 @@ const waitTask = async (
 }
 
 export const imagesRepo = {
+  async update(id: string, patch: ImageMetadataPatch): Promise<ImageMetadataPatch> {
+    if (getStorageMode() === 'local') return await rawImagesRepo.update(id, patch)
+    const fields = {
+      name: 'name', satellite: 'satellite', acquisitionDate: 'acquisition_at',
+      sizeBytes: 'size_bytes', resolution: 'resolution', frequencyBand: 'frequency_band',
+      polarization: 'polarization', description: 'description', status: 'status', errorMessage: 'error_message'
+    } as const
+    const payload: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(patch)) {
+      if (key in fields) payload[fields[key as keyof typeof fields]] = key === 'acquisitionDate' && !value ? null : value
+    }
+    const image = mapApiImageToSarImage(await imagesApi.update(id, payload))
+    // Only merge metadata; keep the currently displayed preview and thumbnail URLs.
+    return Object.fromEntries(Object.keys(fields).map((key) => [key, image[key as keyof SarImage]]).concat([
+      ['fileSize', image.fileSize]
+    ])) as ImageMetadataPatch
+  },
   async list(): Promise<SarImage[]> {
     const mode = getStorageMode()
     if (mode === 'local') return await rawImagesRepo.list()

@@ -189,6 +189,8 @@ def _resolve_sample_geometry(db: Session, project: Project, sample: Sample) -> t
 
 
 def _resolve_source_image(db: Session, project: Project, sample: Sample) -> Image | None:
+    if sample.image_id is None:
+        return None
     source_image = db.scalar(select(Image).where(Image.project_id == project.id, Image.id == sample.image_id))
     if source_image is not None:
         return source_image
@@ -343,7 +345,7 @@ def create_sample(
     project: Project = Depends(get_project),
 ):
     img = db.scalar(select(Image).where(Image.project_id == project.id, Image.id == payload.image_id))
-    if img is None:
+    if payload.image_id is not None and img is None:
         raise HTTPException(status_code=404, detail="Image not found")
 
     s = Sample(
@@ -366,7 +368,7 @@ def create_sample(
 @router.post("/upload", response_model=Envelope[SampleOut])
 async def upload_sample(
     request: Request,
-    image_id: uuid.UUID = Form(...),
+    image_id: uuid.UUID | None = Form(None),
     name: str = Form(...),
     category: str = Form(""),
     remark: str = Form(""),
@@ -383,7 +385,7 @@ async def upload_sample(
     project: Project = Depends(get_project),
 ):
     source_image = db.scalar(select(Image).where(Image.project_id == project.id, Image.id == image_id))
-    if source_image is None:
+    if image_id is not None and source_image is None:
         raise HTTPException(status_code=404, detail="Image not found")
 
     s = None
@@ -398,8 +400,9 @@ async def upload_sample(
 
     settings = get_settings()
     extension = ".tif" if image_format == "image/tiff" else ".jpg" if image_format == "image/jpeg" else ".png"
-    crop_key = f"samples/{image_id}/{s.id}/image{extension}"
-    thumb_key = f"samples/{image_id}/{s.id}/thumbnail.png"
+    source_folder = str(image_id) if image_id is not None else "local"
+    crop_key = f"samples/{source_folder}/{s.id}/image{extension}"
+    thumb_key = f"samples/{source_folder}/{s.id}/thumbnail.png"
 
     with tempfile.TemporaryDirectory() as tmp:
         image_path = os.path.join(tmp, f"image{extension}")
@@ -415,12 +418,13 @@ async def upload_sample(
             thumb_key = crop_key
 
     s.name = name
+    s.image_id = image_id
     s.category = category
     s.remark = remark
     s.roi = {
         "annotationId": annotation_id,
         "annotationType": annotation_type,
-        "imageName": image_name or source_image.name,
+        "imageName": image_name or (source_image.name if source_image else ""),
         "format": image_format,
         "width": width,
         "height": height,
@@ -445,7 +449,7 @@ def export_sample(
     settings = get_settings()
     source_type = str((s.roi or {}).get("format") or "application/octet-stream")
     if format.strip().lower() == "source":
-        if str((s.roi or {}).get("annotationId") or "").startswith("manual:"):
+        if s.image_id is None or str((s.roi or {}).get("annotationId") or "").startswith("manual:"):
             with tempfile.TemporaryDirectory() as tmp:
                 original_path = os.path.join(tmp, Path(s.crop_storage_key).name)
                 download_object_to_file(bucket=settings.s3_bucket, key=s.crop_storage_key, file_path=original_path)

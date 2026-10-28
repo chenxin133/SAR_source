@@ -4,7 +4,7 @@ import type { SarSample } from '../types/samples'
 
 type ApiSample = {
   id: string
-  image_id: string
+  image_id: string | null
   name?: string | null
   category?: string | null
   remark?: string | null
@@ -30,7 +30,7 @@ const mapSample = async (row: ApiSample): Promise<SarSample> => {
   return {
     id: row.id,
     name: row.name || row.id,
-    imageId: row.image_id,
+    imageId: row.image_id || '',
     imageName: String(roi.imageName ?? ''),
     annotationId: String(roi.annotationId ?? ''),
     annotationType: roi.annotationType === 'polygon' ? 'polygon' : 'rect',
@@ -54,7 +54,7 @@ export const samplesApi = {
 
   async put(sample: SarSample): Promise<SarSample> {
     const form = new FormData()
-    form.append('image_id', sample.imageId)
+    if (sample.imageId) form.append('image_id', sample.imageId)
     form.append('name', sample.name)
     form.append('category', sample.category)
     form.append('remark', sample.remark)

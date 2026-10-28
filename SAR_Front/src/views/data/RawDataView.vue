@@ -80,11 +80,10 @@
     <RawImageUploadDialog v-model="uploadVisible" />
 
     <!-- Details Dialog -->
-    <el-dialog v-model="detailsVisible" title="影像详情" width="600px">
-        <el-descriptions :column="1" border v-if="selectedImage">
-            <el-descriptions-item label="ID">{{ selectedImage.id }}</el-descriptions-item>
-            <el-descriptions-item label="名称">{{ selectedImage.name }}</el-descriptions-item>
-            <el-descriptions-item label="缩略图">
+    <el-dialog v-model="detailsVisible" title="影像详情" width="600px" destroy-on-close>
+        <RawImageDetails v-if="selectedImage" :key="selectedImage.id" :image="selectedImage"
+          :save-metadata="(patch) => store.updateImage(selectedImage!.id, patch)">
+          <template #thumbnail>
                 <el-image 
                     v-if="(selectedImage.thumbnailUrl || selectedImage.previewUrl) && !isTiffFile(selectedImage.name)"
                     style="width: 100px; height: 100px" 
@@ -105,30 +104,8 @@
                     点击预览TIFF
                 </el-button>
                 <span v-else>无预览图</span>
-            </el-descriptions-item>
-            <el-descriptions-item v-if="!isBackendMode" label="卫星源">{{ selectedImage.satellite }}</el-descriptions-item>
-            <el-descriptions-item label="地区">{{ getImageRegion(selectedImage) || '无' }}</el-descriptions-item>
-            <el-descriptions-item label="采集时间">{{ selectedImage.acquisitionDate }}</el-descriptions-item>
-            <el-descriptions-item label="文件大小">{{ selectedImage.fileSize }}</el-descriptions-item>
-            <el-descriptions-item v-if="!isBackendMode" label="分辨率">{{ selectedImage.resolution || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="数据频段">{{ selectedImage.frequencyBand || '-' }}</el-descriptions-item>
-            <el-descriptions-item v-if="!isBackendMode" label="极化方式">{{ selectedImage.polarization || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="状态">
-                <el-tag size="small">{{ selectedImage.status }}</el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item v-if="selectedImage.errorMessage" label="失败原因">
-                <span class="error-text">{{ selectedImage.errorMessage }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item v-if="selectedImage.originalPersistent === false" label="预览提示">
-                <el-alert
-                    :title="selectedImage.previewNotice || '原图超过 200MB，仅当前会话可用；系统将优先展示持久化预览图。'"
-                    type="warning"
-                    :closable="false"
-                    show-icon
-                />
-            </el-descriptions-item>
-            <el-descriptions-item label="备注">{{ getImageRemark(selectedImage) || '无' }}</el-descriptions-item>
-        </el-descriptions>
+          </template>
+        </RawImageDetails>
         <template #footer>
             <el-button type="primary" plain @click="handlePreview(selectedImage!)" v-if="selectedImage?.previewUrl || selectedImage?.thumbnailUrl">
                 全屏预览
@@ -155,6 +132,7 @@ import { useRawDataStore } from '../../stores/rawData'
 import type { SarImage } from '../../types/sar'
 import ImageViewer from '../../components/ImageViewer.vue'
 import RawImageUploadDialog from '../../components/raw/RawImageUploadDialog.vue'
+import RawImageDetails from '../../components/raw/RawImageDetails.vue'
 import { getStorageMode } from '../../config/storage'
 import { exportLocalDataPackage } from '../../utils/migrationExport'
 import { unpackImageDescription } from '../../utils/imageMetadata'

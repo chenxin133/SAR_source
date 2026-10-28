@@ -154,7 +154,7 @@ class Sample(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
-    image_id: Mapped[uuid.UUID] = mapped_column(GUID(), nullable=False)
+    image_id: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
 
     name: Mapped[str | None] = mapped_column(Text)
     category: Mapped[str | None] = mapped_column(Text)

@@ -4,6 +4,7 @@ export interface SarImage {
   satellite: string;
   acquisitionDate: string; // ISO String
   fileSize: string;
+  sizeBytes?: number;
   resolution?: string;
   frequencyBand?: string; // Ka, Ku, X, C
   polarization?: string; // Single, dual, or quad polarization combination
@@ -18,6 +19,11 @@ export interface SarImage {
   previewNotice?: string;
   errorMessage?: string;
 }
+
+export type ImageMetadataPatch = Partial<Pick<SarImage,
+  'name' | 'satellite' | 'acquisitionDate' | 'sizeBytes' | 'fileSize' |
+  'resolution' | 'frequencyBand' | 'polarization' | 'description' | 'status' | 'errorMessage'
+>>;
 
 export interface UploadPayload {
   name: string;

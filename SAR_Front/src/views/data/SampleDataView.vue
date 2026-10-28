@@ -83,7 +83,7 @@
       <div v-if="previewSample" class="preview-meta">
         <div>名称：{{ previewSample.name }}</div>
         <div>类别：{{ previewSample.category || '未分类' }}</div>
-        <div>来源：{{ previewSample.imageName || previewSample.imageId }}</div>
+        <div>来源：{{ previewSample.imageName || previewSample.imageId || '本地上传（未关联）' }}</div>
         <div>标注：{{ previewSample.annotationType }} / {{ previewSample.annotationId }}</div>
         <div>尺寸：{{ previewSample.width }} × {{ previewSample.height }}</div>
       </div>
@@ -95,7 +95,7 @@
           <el-input v-model="uploadForm.name" placeholder="请输入样本名称" />
         </el-form-item>
         <el-form-item label="来源影像" prop="imageId">
-          <el-select v-model="uploadForm.imageId" filterable placeholder="选择来源影像" style="width: 100%">
+          <el-select v-model="uploadForm.imageId" filterable clearable placeholder="来源影像（可选）" style="width: 100%">
             <el-option v-for="image in images" :key="image.id" :label="`${image.name} (${image.id})`" :value="image.id" />
           </el-select>
         </el-form-item>
@@ -214,7 +214,7 @@ const imageMetaById = computed(() => {
   return map
 })
 
-const isLocalSample = (sample: SarSample) => sample.imageId.startsWith('local-upload:')
+const isLocalSample = (sample: SarSample) => !sample.imageId || sample.imageId.startsWith('local-upload:')
 const canOpenAnnotate = (sample: SarSample) => !isLocalSample(sample) && imageMetaById.value.has(sample.imageId)
 
 const formatTime = (ts: number) => {
@@ -420,7 +420,6 @@ const uploadForm = reactive<SampleUploadForm>({
 
 const uploadRules = {
   name: [{ required: true, message: '请输入样本名称', trigger: 'blur' }],
-  imageId: [{ required: true, message: '请选择来源影像', trigger: 'change' }],
   annotationType: [{ required: true, message: '请选择标注类型', trigger: 'change' }],
   category: [{ required: true, message: '请输入类别', trigger: 'blur' }]
 } as const

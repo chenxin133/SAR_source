@@ -9,6 +9,15 @@ import type {
 import { unwrapEnvelope } from '../types/backend'
 
 export const imagesApi = {
+  async update(imageId: string, patch: Partial<Pick<ApiImageOut,
+    'name' | 'satellite' | 'acquisition_at' | 'size_bytes' | 'resolution' |
+    'frequency_band' | 'polarization' | 'description' | 'status' | 'error_message'
+  >>): Promise<ApiImageOut> {
+    const res = await requestJson<ApiEnvelope<ApiImageOut>>(`/images/${encodeURIComponent(imageId)}`, {
+      method: 'PATCH', body: JSON.stringify(patch)
+    })
+    return unwrapEnvelope(res)
+  },
   async getRegion(
     imageId: string,
     region: { x: number; y: number; width: number; height: number; maxSize?: number }
