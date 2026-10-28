@@ -52,4 +52,12 @@ describe('raw image detail editing', () => {
     await flushPromises()
     expect(saveMetadata).toHaveBeenLastCalledWith({ description: '地区：上海\n备注：原备注' })
   })
+  it('preserves the entered acquisition time without a timezone shift', async () => {
+    const { wrapper, saveMetadata } = setup()
+    await wrapper.get('[data-field="acquisitionDate"]').trigger('dblclick')
+    await wrapper.get('input').setValue('2026-10-28 14:30:00')
+    await wrapper.get('input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(saveMetadata).toHaveBeenCalledWith({ acquisitionDate: '2026-10-28 14:30:00' })
+  })
 })

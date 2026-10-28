@@ -84,7 +84,9 @@ const save = async () => {
     } else if (key === 'acquisitionDate') {
       const date = new Date(value)
       if (value && !Number.isFinite(date.getTime())) throw new Error('请输入有效的采集时间')
-      patch = { acquisitionDate: value ? date.toISOString() : '' }
+      // Keep the displayed wall-clock value; converting a timezone-less database
+      // timestamp to UTC here would silently move the acquisition time by hours.
+      patch = { acquisitionDate: value }
     } else {
       if (key === 'name' && !value) throw new Error('名称不能为空')
       patch = { [key]: value }
