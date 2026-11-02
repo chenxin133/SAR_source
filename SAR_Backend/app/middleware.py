@@ -72,4 +72,5 @@ class JsonLogMiddleware(BaseHTTPMiddleware):
                 "status_code": getattr(response, "status_code", 500),
                 "duration_ms": duration_ms,
             }
-            print(json.dumps(entry, ensure_ascii=False))
+            # Keep structured logs writable on legacy Windows console encodings.
+            print(json.dumps(entry, ensure_ascii=True))
