@@ -3,6 +3,9 @@
     v-model="visibleProxy"
     :title="dialogTitle"
     width="520px"
+    :close-on-click-modal="!store.isUploading"
+    :close-on-press-escape="!store.isUploading"
+    :show-close="!store.isUploading"
     @closed="handleClosed"
   >
     <el-form ref="formRef" :model="form" label-width="100px" :rules="rules">
@@ -83,6 +86,12 @@
         </div>
       </el-form-item>
 
+      <el-form-item label="配套 XML">
+        <XmlMetadataPicker ref="xmlPicker" :image-file="form.file" :image-filename="form.file?.name" :disabled="store.isUploading"
+          @parsed="applyXml" @cleared="clearXml" @parsing="xmlParsing = $event" />
+      </el-form-item>
+      <el-alert v-if="xmlSatelliteMismatch" type="error" :closable="false"
+        :title="`XML 卫星为 ${xmlAttachment?.metadata.satellite}，与当前入口不同。请使用对应卫星入口或原始影像管理录入。`" />
       <el-form-item label="备注">
         <el-input v-model="form.description" type="textarea" />
       </el-form-item>
@@ -96,7 +105,7 @@
     <template #footer>
       <span class="dialog-footer">
         <el-button @click="visibleProxy = false" :disabled="store.isUploading">取消</el-button>
-        <el-button type="primary" @click="submitUpload" :loading="store.isUploading">
+        <el-button type="primary" @click="submitUpload" :loading="store.isUploading" :disabled="xmlParsing || xmlSatelliteMismatch">
           {{ store.isUploading ? '上传中...' : '确定上传' }}
         </el-button>
       </span>
@@ -105,6 +114,9 @@
 </template>
 
 <script setup lang="ts">
+import XmlMetadataPicker from '../XmlMetadataPicker.vue'
+import type { XmlAttachment } from '../../types/metadata'
+import { applyXmlAutofill, clearXmlAutofill } from '../../utils/xmlAutofill'
 import { computed, reactive, ref, watch } from 'vue'
 import {
   ElMessage,
@@ -165,6 +177,14 @@ const satelliteReadonly = computed(() => !!props.satelliteReadonly)
 const dialogTitle = computed(() => (props.satellitePreset ? `上传原始影像（${props.satellitePreset}）` : '上传原始影像'))
 
 const formRef = ref<FormInstance>()
+const xmlPicker = ref<InstanceType<typeof XmlMetadataPicker>>()
+const xmlAttachment = ref<XmlAttachment | null>(null)
+const xmlParsing = ref(false)
+const xmlSatelliteMismatch = computed(() => !!(props.satelliteReadonly && props.satellitePreset &&
+  xmlAttachment.value?.metadata.satellite &&
+  normalizeSatelliteName(xmlAttachment.value.metadata.satellite) !== normalizeSatelliteName(props.satellitePreset)))
+let xmlAuto: Record<string, string> = {}
+let xmlTimeDisplay = ''
 const uploadRef = ref<UploadInstance>()
 const fileList = ref<UploadUserFile[]>([])
 
@@ -181,6 +201,7 @@ const form = reactive<RawImageUploadForm>({
 })
 
 const rules = {
+  resolution: [{ required: true, message: '请从 XML 读取或手动填写分辨率', trigger: 'blur' }],
   name: [{ required: true, message: '请输入影像名称', trigger: 'blur' }],
   satellite: [{ required: true, message: '请选择卫星源', trigger: 'change' }],
   region: [{ required: true, message: '请输入地区', trigger: 'blur' }],
@@ -240,6 +261,9 @@ const clearSelectedFile = () => {
 }
 
 const resetForm = (keepSatellitePreset: boolean) => {
+  xmlPicker.value?.clear()
+  xmlAttachment.value = null
+  xmlAuto = {}
   form.name = ''
   form.acquisitionAt = ''
   form.region = ''
@@ -287,8 +311,28 @@ const handleExceed = () => {
   ElMessage.warning('最多只能选择 1 个文件，请先移除已选文件')
 }
 
+const clearXml = () => {
+  clearXmlAutofill(form, xmlAuto, { name: form.file?.name || '', satellite: props.satellitePreset || '' })
+  xmlAuto = {}; xmlAttachment.value = null; xmlTimeDisplay = ''
+}
+const applyXml = (attachment: XmlAttachment) => {
+  const metadata = attachment.metadata
+  xmlTimeDisplay = metadata.acquisition_at.replace(/[Zz]$/, '').replace(/[+-]\d{2}:\d{2}$/, '').replace(/\.\d+$/, '')
+  xmlAuto = applyXmlAutofill(form, {
+    name: metadata.name, satellite: props.satelliteReadonly ? props.satellitePreset || '' : normalizeSatelliteName(metadata.satellite), acquisitionAt: xmlTimeDisplay,
+    resolution: metadata.resolution, frequencyBand: metadata.frequency_band,
+    polarization: metadata.polarization, region: metadata.region
+  }, xmlAuto, { name: form.file?.name || '', satellite: props.satellitePreset || '' })
+  xmlAttachment.value = attachment
+  formRef.value?.clearValidate()
+}
+
 const submitUpload = async () => {
+  if (xmlSatelliteMismatch.value || xmlParsing.value) return
   if (!formRef.value) return
+  const missing = Object.entries({ 影像名称: form.name, 卫星源: form.satellite, 分辨率: form.resolution,
+    地区: form.region, 数据频段: form.frequencyBand, 极化方式: form.polarization }).find(([, value]) => !value.trim())
+  if (missing) { ElMessage.warning(`请填写${missing[0]}`); return }
 
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
@@ -308,7 +352,9 @@ const submitUpload = async () => {
     name: form.name,
     satellite,
     file: form.file,
-    acquisitionAt: form.acquisitionAt || undefined,
+    acquisitionAt: xmlAttachment.value && form.acquisitionAt === xmlTimeDisplay ? xmlAttachment.value.metadata.acquisition_at || undefined : form.acquisitionAt || undefined,
+    metadataXmlBase64: xmlAttachment.value?.base64,
+    metadataXmlFilename: xmlAttachment.value?.file.name,
     description: packImageDescription(form.region, form.description),
     resolution: form.resolution,
     frequencyBand: form.frequencyBand,

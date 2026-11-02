@@ -1,3 +1,4 @@
+import { withDuplicateChoice } from '../utils/duplicateImport'
 import { buildUrl, requestJson } from './http'
 import { unwrapEnvelope, type ApiEnvelope } from '../types/backend'
 
@@ -26,7 +27,10 @@ export const echoesApi = {
     const form = new FormData()
     form.append('file', file)
     Object.entries(fields).forEach(([key, value]) => form.append(key, String(value)))
-    return unwrapEnvelope(await requestJson<ApiEnvelope<EchoSignal>>('/echoes/upload', { method: 'POST', body: form }))
+    return unwrapEnvelope(await withDuplicateChoice((action) => {
+      form.set('duplicate_action', action)
+      return requestJson<ApiEnvelope<EchoSignal>>('/echoes/upload', { method: 'POST', body: form })
+    }))
   },
   async simulate(payload: EchoSimulation) {
     return unwrapEnvelope(await requestJson<ApiEnvelope<EchoSignal>>('/echoes/simulate', {
@@ -47,7 +51,7 @@ export const echoesApi = {
     if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`)
     const url = URL.createObjectURL(await response.blob())
     const link = document.createElement('a')
-    link.href = url; link.download = row.original_filename; link.click()
+    link.href = url; link.download = (row.name.toLowerCase().endsWith('.dat') ? row.name : row.name + '.dat').replace(/[<>:"/\\|?*]/g, '_'); link.click()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 }

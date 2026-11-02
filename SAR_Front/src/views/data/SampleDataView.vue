@@ -4,9 +4,13 @@
       <h2>样本数据管理</h2>
       <div class="header-buttons">
         <el-button type="primary" plain @click="uploadVisible = true">本地上传样本</el-button>
-        <el-dropdown @command="handleBatchExport">
-          <el-button :loading="isBatchExporting">
-            批量导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        <el-select v-model="exportResolution" aria-label="批量导出分辨率" style="width: 180px" placeholder="导出分辨率">
+          <el-option label="原分辨率" value="" />
+          <el-option v-for="value in batchResolutionOptions" :key="value" :label="`${value} m`" :value="value" />
+        </el-select>
+        <el-dropdown trigger="click" :disabled="!batchRows.length || isBatchExporting" @command="handleBatchExport">
+          <el-button :loading="isBatchExporting" :disabled="!batchRows.length">
+            {{ exportScope === 'selected' ? '导出选中' : '导出筛选结果' }}（{{ batchRows.length }}）<el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -29,8 +33,8 @@
         <el-option v-for="item in categoryOptions" :key="item" :label="item" :value="item" />
       </el-select>
       <el-select v-model="annotationFilter" placeholder="全部标注类型" clearable style="width: 160px">
-        <el-option label="矩形" value="rect" />
-        <el-option label="多边形" value="polygon" />
+        <el-option v-if="annotationOptions.includes('rect')" label="矩形" value="rect" />
+        <el-option v-if="annotationOptions.includes('polygon')" label="多边形" value="polygon" />
       </el-select>
       <el-select v-model="sourceFilter" placeholder="全部来源影像" clearable style="width: 220px">
         <el-option v-for="item in sourceOptions" :key="item" :label="item" :value="item" />
@@ -44,14 +48,29 @@
       <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
         <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
       </el-select>
+      <el-select v-model="resolutionFilter" placeholder="全部分辨率" clearable filterable style="width: 180px">
+        <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
     </div>
 
-    <el-table v-if="filteredTableData.length" :data="filteredTableData" style="width: 100%" border>
+    <div class="batch-scope">
+      <el-radio-group v-model="exportScope" aria-label="批量导出范围">
+        <el-radio-button value="selected">勾选样本（{{ selectedRows.length }}）</el-radio-button>
+        <el-radio-button value="filtered">全部筛选结果（{{ filteredTableData.length }}）</el-radio-button>
+      </el-radio-group>
+      <span>勾选表格左侧复选框；导出包含影像和配套 XML。</span>
+    </div>
+
+    <el-table v-if="filteredTableData.length" :data="filteredTableData" row-key="id" style="width: 100%" border @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" />
       <el-table-column prop="id" label="样本ID" width="120" />
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="category" label="类别" width="140" />
       <el-table-column prop="source" label="来源影像" min-width="180" />
       <el-table-column prop="annotation" label="标注" width="220" />
+      <el-table-column label="分辨率" width="140">
+        <template #default="{ row }">{{ resolutionLabel(row.resolution) }}</template>
+      </el-table-column>
       <el-table-column prop="size" label="尺寸" width="110" />
       <el-table-column prop="time" label="时间" width="160" />
       <el-table-column label="操作" width="300" fixed="right">
@@ -66,6 +85,12 @@
                 <el-dropdown-item command="image/tiff">可视化 TIFF</el-dropdown-item>
                 <el-dropdown-item command="image/png">PNG</el-dropdown-item>
                 <el-dropdown-item command="image/jpeg">JPEG</el-dropdown-item>
+              <el-dropdown-item v-for="target in coarserResolutions([effectiveResolution(scope.row.raw)])" :key="target" :command="`downsample:${target}`" divided>
+                降采样 {{ target }} m（原格式）
+              </el-dropdown-item>
+              <el-dropdown-item v-if="!coarserResolutions([effectiveResolution(scope.row.raw)]).length" disabled divided>
+                无可用的更粗分辨率
+              </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -79,7 +104,7 @@
     </div>
 
     <el-dialog v-model="previewVisible" title="样本预览" width="760px" destroy-on-close @closed="clearPreview">
-      <el-image v-if="previewUrl" :src="previewUrl" fit="contain" style="width: 100%; height: 420px; background: #111" />
+      <el-image v-if="previewUrl" class="sample-preview-image" :src="previewUrl" fit="contain" style="width: 100%; height: 420px" />
       <div v-if="previewSample" class="preview-meta">
         <div>名称：{{ previewSample.name }}</div>
         <div>类别：{{ previewSample.category || '未分类' }}</div>
@@ -91,13 +116,23 @@
 
     <el-dialog v-model="uploadVisible" title="本地上传样本" width="520px" destroy-on-close @closed="resetUploadForm">
       <el-form ref="uploadFormRef" :model="uploadForm" :rules="uploadRules" label-width="90px">
-        <el-form-item label="样本名称" prop="name">
-          <el-input v-model="uploadForm.name" placeholder="请输入样本名称" />
-        </el-form-item>
+        <el-alert title="按 类别_频段_分辨率_编号 自动命名，并生成同名 XML；编号从 0001 开始。" type="info" :closable="false" />
         <el-form-item label="来源影像" prop="imageId">
           <el-select v-model="uploadForm.imageId" filterable clearable placeholder="来源影像（可选）" style="width: 100%">
             <el-option v-for="image in images" :key="image.id" :label="`${image.name} (${image.id})`" :value="image.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="分辨率" required>
+          <el-input v-model="uploadForm.resolution" :placeholder="uploadForm.imageId ? '留空跟随来源影像，例如 1m' : '必填，例如 1m'" />
+        </el-form-item>
+        <el-form-item label="频段" required>
+          <el-select v-model="uploadForm.frequencyBand" clearable filterable allow-create placeholder="可从来源影像或 XML 读取" style="width:100%">
+            <el-option v-for="band in frequencyBandOptions" :key="band" :value="band" :label="band" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="配套 XML">
+          <XmlMetadataPicker ref="sampleXmlPicker" :image-file="uploadForm.file" :image-filename="uploadForm.file?.name" :disabled="uploading"
+            @parsed="applySampleXml" @cleared="clearSampleXml" @parsing="sampleXmlParsing = $event" />
         </el-form-item>
         <el-form-item label="标注类型" prop="annotationType">
           <el-select v-model="uploadForm.annotationType" style="width: 100%">
@@ -138,7 +173,7 @@
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="uploadVisible = false" :disabled="uploading">取消</el-button>
-          <el-button type="primary" :loading="uploading" @click="submitLocalUpload">
+          <el-button type="primary" :loading="uploading" :disabled="sampleXmlParsing" @click="submitLocalUpload">
             {{ uploading ? '上传中...' : '确定上传' }}
           </el-button>
         </span>
@@ -148,6 +183,10 @@
 </template>
 
 <script setup lang="ts">
+import XmlMetadataPicker from '../../components/XmlMetadataPicker.vue'
+import type { XmlAttachment } from '../../types/metadata'
+import { applyXmlAutofill, clearXmlAutofill } from '../../utils/xmlAutofill'
+import { ImportCancelledError } from '../../utils/duplicateImport'
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type UploadFile, type UploadFiles, type UploadInstance, type UploadUserFile } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -156,15 +195,20 @@ import { samplesRepo } from '../../repositories/samplesRepo'
 import type { SarImage } from '../../types/sar'
 import type { SarSample } from '../../types/samples'
 import { unpackImageDescription } from '../../utils/imageMetadata'
-import { buildPolarizationOptions } from '../../constants/polarizations'
+import { buildResolutionOptions, resolutionKey, resolutionLabel, coarserResolutions } from '../../utils/resolution'
 import { buildLocalSampleImage, isAllowedSampleFile, SAMPLE_UPLOAD_ACCEPT } from '../../utils/sampleUpload'
 
+const exportResolution = ref<number | ''>('')
+const effectiveResolution = (sample: SarSample) => sample.resolution || imageMetaById.value.get(sample.imageId)?.resolution || ''
+const batchResolutionOptions = computed(() => coarserResolutions(batchRows.value.map((row) => row.resolution)))
 const router = useRouter()
 const route = useRoute()
 
 type SampleUploadForm = {
   name: string
   imageId: string
+  resolution: string
+  frequencyBand: string
   annotationType: 'rect' | 'polygon'
   category: string
   remark: string
@@ -177,6 +221,7 @@ type Row = {
   category: string
   source: string
   region: string
+  resolution: string
   frequencyBand: string
   polarization: string
   annotation: string
@@ -187,6 +232,11 @@ type Row = {
 
 const samples = ref<SarSample[]>([])
 const isBatchExporting = ref(false)
+const exportScope = ref<'selected' | 'filtered'>('selected')
+const selectedIds = ref<string[]>([])
+const selectedRows = computed(() => filteredTableData.value.filter(row => selectedIds.value.includes(row.id)))
+const batchRows = computed(() => exportScope.value === 'selected' ? selectedRows.value : filteredTableData.value)
+const handleSelectionChange = (rows: Row[]) => { selectedIds.value = rows.map(row => row.id) }
 const images = ref<SarImage[]>([])
 const keyword = ref('')
 const categoryFilter = ref('')
@@ -195,6 +245,7 @@ const sourceFilter = ref('')
 const regionFilter = ref('')
 const frequencyBandFilter = ref('')
 const polarizationFilter = ref('')
+const resolutionFilter = ref('')
 
 const normalizeFilterValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
 
@@ -233,7 +284,8 @@ const tableData = computed<Row[]>(() => {
       category: s.category || '未分类',
       source: isLocalSample(s) ? '本地上传' : s.imageName || s.imageId,
       region: parsed.region || '',
-      frequencyBand: String(imageMeta?.frequencyBand || ''),
+      resolution: s.resolution || imageMeta?.resolution || '',
+      frequencyBand: s.frequencyBand || String(imageMeta?.frequencyBand || ''),
       polarization: String(imageMeta?.polarization || ''),
       annotation: isLocalSample(s) ? '本地上传 / 无关联标注' : `${s.annotationType} / ${s.annotationId}`,
       size: `${s.width}×${s.height}`,
@@ -243,13 +295,16 @@ const tableData = computed<Row[]>(() => {
   })
 })
 
-const categoryOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.category)))
-const sourceOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.source)))
-const regionOptions = computed(() => buildUniqueOptions(tableData.value.map((row) => row.region)))
-const frequencyBandOptions = ['Ka', 'Ku', 'X', 'C']
-const polarizationOptions = computed(() => buildPolarizationOptions(tableData.value.map((row) => row.polarization)))
+type SampleFilter = 'resolution' | 'category' | 'annotation' | 'source' | 'region' | 'frequencyBand' | 'polarization'
+const resolutionOptions = computed(() => buildResolutionOptions(filterRows('resolution').map(row => row.resolution)))
+const categoryOptions = computed(() => buildUniqueOptions(filterRows('category').map(row => row.category)))
+const annotationOptions = computed(() => [...new Set(filterRows('annotation').map(row => row.raw.annotationType))])
+const sourceOptions = computed(() => buildUniqueOptions(filterRows('source').map(row => row.source)))
+const regionOptions = computed(() => buildUniqueOptions(filterRows('region').map(row => row.region)))
+const frequencyBandOptions = computed(() => buildUniqueOptions(filterRows('frequencyBand').map(row => row.frequencyBand)))
+const polarizationOptions = computed(() => buildUniqueOptions(filterRows('polarization').map(row => row.polarization)))
 
-const filteredTableData = computed<Row[]>(() => {
+const filterRows = (omit?: SampleFilter): Row[] => {
   const keywordValue = normalizeFilterValue(keyword.value)
   const categoryValue = normalizeFilterValue(categoryFilter.value)
   const annotationValue = normalizeFilterValue(annotationFilter.value)
@@ -266,18 +321,19 @@ const filteredTableData = computed<Row[]>(() => {
       row.region.toLowerCase().includes(keywordValue) ||
       row.frequencyBand.toLowerCase().includes(keywordValue) ||
       row.polarization.toLowerCase().includes(keywordValue)
-    const matchCategory = !categoryValue || row.category.toLowerCase() === categoryValue
-    const matchAnnotation = !annotationValue || row.raw.annotationType.toLowerCase() === annotationValue
-    const matchSource = !sourceValue || row.source.toLowerCase() === sourceValue
-    const matchRegion = !regionValue || row.region.toLowerCase() === regionValue
-    const matchFrequencyBand = !frequencyBandValue || row.frequencyBand.toLowerCase() === frequencyBandValue
-    const matchPolarization = !polarizationValue || row.polarization.toLowerCase() === polarizationValue
-    return matchKeyword && matchCategory && matchAnnotation && matchSource && matchRegion && matchFrequencyBand && matchPolarization
+    const matchCategory = omit === 'category' || !categoryValue || row.category.toLowerCase() === categoryValue
+    const matchAnnotation = omit === 'annotation' || !annotationValue || row.raw.annotationType.toLowerCase() === annotationValue
+    const matchSource = omit === 'source' || !sourceValue || row.source.toLowerCase() === sourceValue
+    const matchRegion = omit === 'region' || !regionValue || row.region.toLowerCase() === regionValue
+    const matchFrequencyBand = omit === 'frequencyBand' || !frequencyBandValue || row.frequencyBand.toLowerCase() === frequencyBandValue
+    const matchPolarization = omit === 'polarization' || !polarizationValue || row.polarization.toLowerCase() === polarizationValue
+    return (omit === 'resolution' || !resolutionFilter.value || resolutionKey(row.resolution) === resolutionFilter.value) && matchKeyword && matchCategory && matchAnnotation && matchSource && matchRegion && matchFrequencyBand && matchPolarization
   })
-})
+}
+const filteredTableData = computed(() => filterRows())
 
 const hasActiveFilters = computed(() => {
-  return [keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value, regionFilter.value, frequencyBandFilter.value, polarizationFilter.value].some(
+  return [resolutionFilter.value, keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value, regionFilter.value, frequencyBandFilter.value, polarizationFilter.value].some(
     (value) => String(value || '').trim().length > 0
   )
 })
@@ -299,7 +355,8 @@ const clearPreview = () => {
 const openPreview = (row: Row) => {
   clearPreview()
   previewSample.value = row.raw
-  previewUrl.value = URL.createObjectURL(row.raw.thumbnail || row.raw.image)
+  // Legacy PNG thumbnails discarded alpha; the full sample retains its mask.
+  previewUrl.value = URL.createObjectURL(row.raw.format === 'image/png' ? row.raw.image : row.raw.thumbnail || row.raw.image)
   previewVisible.value = true
 }
 
@@ -314,67 +371,40 @@ const openAnnotate = (row: Row) => {
 }
 
 type ExportCommand = 'origin' | 'image/tiff' | 'image/png' | 'image/jpeg'
-const sanitizeFileName = (name: string) => name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'sample'
-const extFromType = (type: SarSample['format']) => (type === 'image/tiff' ? 'tif' : type === 'image/png' ? 'png' : 'jpg')
 const triggerDownload = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
   window.setTimeout(() => URL.revokeObjectURL(url), 1500)
 }
-const transcodeImageBlob = async (blob: Blob, target: SarSample['format']) => {
-  if (blob.type === target) return blob
-  const bmp = await createImageBitmap(blob)
-  const canvas = document.createElement('canvas')
-  canvas.width = bmp.width
-  canvas.height = bmp.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('无法创建导出画布')
-  if (target === 'image/jpeg') {
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-  }
-  ctx.drawImage(bmp, 0, 0)
-  bmp.close()
-  return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((out) => (out ? resolve(out) : reject(new Error('导出失败'))), target, target === 'image/jpeg' ? 0.92 : undefined)
-  })
-}
-const exportOne = async (sample: SarSample, command: ExportCommand) => {
-  const blob =
-    command === 'origin'
-      ? await samplesRepo.exportBlob(sample, 'source')
-      : sample.format === 'image/tiff' || command === 'image/tiff'
-        ? await samplesRepo.exportBlob(sample, command)
-        : await transcodeImageBlob(sample.image, command)
-  const type: SarSample['format'] =
-    command === 'origin'
-      ? blob.type === 'image/tiff'
-        ? 'image/tiff'
-        : blob.type === 'image/jpeg'
-          ? 'image/jpeg'
-          : 'image/png'
-      : command
-  triggerDownload(blob, `${sanitizeFileName(sample.name)}_${sample.id}.${extFromType(type)}`)
+const exportOne = async (sample: SarSample, command: ExportCommand, targetResolution?: number) => {
+  const bundle = await samplesRepo.exportBundle([sample], command === 'origin' ? 'source' : command, targetResolution, imageMetaById.value)
+  triggerDownload(bundle, `${sample.name}.zip`)
 }
 const handleExportOne = async (sample: SarSample, command: unknown) => {
   try {
-    await exportOne(sample, command as ExportCommand)
+    const value = String(command)
+    const target = value.startsWith('downsample:') ? Number(value.split(':')[1]) : undefined
+    await exportOne(sample, target != null ? 'origin' : command as ExportCommand, target)
   } catch (e: any) {
     ElMessage.error(e?.message || '导出失败')
   }
 }
 const handleBatchExport = async (command: unknown) => {
-  if (!filteredTableData.value.length || isBatchExporting.value) return
+  if (!batchRows.value.length || isBatchExporting.value) return
+  const rows = [...batchRows.value]
+  const target = exportResolution.value === '' ? undefined : exportResolution.value
+  if (target != null && !batchResolutionOptions.value.includes(target)) {
+    ElMessage.warning('本次导出的样本中有未知分辨率或不满足降采样条件的样本，请重新选择导出分辨率')
+    return
+  }
   isBatchExporting.value = true
   try {
-    for (const row of filteredTableData.value) {
-      await exportOne(row.raw, command as ExportCommand)
-      await new Promise((resolve) => setTimeout(resolve, 80))
-    }
-    ElMessage.success(`已开始导出 ${filteredTableData.value.length} 个样本`)
+    const format = command === 'origin' ? 'source' : command as SarSample['format']
+    const bundle = await samplesRepo.exportBundle(rows.map((row) => row.raw), format, target, imageMetaById.value)
+    triggerDownload(bundle, 'samples.zip')
+    ElMessage.success(`已开始导出 ${rows.length} 个样本`)
+  } catch (error: any) {
+    ElMessage.error(error?.message || '批量导出失败')
   } finally {
     isBatchExporting.value = false
   }
@@ -404,6 +434,18 @@ const handleSamplesChanged = () => {
   void reload()
 }
 
+const sampleXmlPicker = ref<InstanceType<typeof XmlMetadataPicker>>()
+const sampleXml = ref<XmlAttachment | null>(null)
+const sampleXmlParsing = ref(false)
+let sampleXmlAuto: Record<string, string> = {}
+const clearSampleXml = () => {
+  clearXmlAutofill(uploadForm, sampleXmlAuto)
+  sampleXmlAuto = {}; sampleXml.value = null
+}
+const applySampleXml = (value: XmlAttachment) => {
+  sampleXmlAuto = applyXmlAutofill(uploadForm, { resolution: value.metadata.resolution, frequencyBand: value.metadata.frequency_band, category: value.metadata.category }, sampleXmlAuto)
+  sampleXml.value = value
+}
 const uploadVisible = ref(false)
 const uploading = ref(false)
 const uploadFormRef = ref<FormInstance>()
@@ -412,6 +454,8 @@ const uploadFileList = ref<UploadUserFile[]>([])
 const uploadForm = reactive<SampleUploadForm>({
   name: '',
   imageId: '',
+  resolution: '',
+  frequencyBand: '',
   annotationType: 'rect',
   category: '',
   remark: '',
@@ -419,7 +463,6 @@ const uploadForm = reactive<SampleUploadForm>({
 })
 
 const uploadRules = {
-  name: [{ required: true, message: '请输入样本名称', trigger: 'blur' }],
   annotationType: [{ required: true, message: '请选择标注类型', trigger: 'change' }],
   category: [{ required: true, message: '请输入类别', trigger: 'blur' }]
 } as const
@@ -427,6 +470,9 @@ const uploadRules = {
 const resetUploadForm = () => {
   uploadForm.name = ''
   uploadForm.imageId = ''
+  sampleXmlPicker.value?.clear()
+  uploadForm.resolution = ''
+  uploadForm.frequencyBand = ''
   uploadForm.annotationType = 'rect'
   uploadForm.category = ''
   uploadForm.remark = ''
@@ -479,6 +525,10 @@ const buildLocalSamplePayload = async (file: File) => {
     id,
     name: uploadForm.name.trim(),
     imageId: uploadForm.imageId,
+    resolution: uploadForm.resolution.trim(),
+    frequencyBand: uploadForm.frequencyBand.trim(),
+    metadataXmlFile: sampleXml.value?.file,
+    sceneMetadata: sampleXml.value?.metadata,
     imageName: sourceImage?.name || uploadForm.imageId,
     annotationId: `manual:${id}`,
     annotationType: uploadForm.annotationType,
@@ -496,15 +546,19 @@ const submitLocalUpload = async () => {
     ElMessage.warning('请选择样本文件')
     return
   }
+  const source = imageMetaById.value.get(uploadForm.imageId)
+  if (!(uploadForm.resolution.trim() || source?.resolution)) return void ElMessage.warning('请填写分辨率或选择有分辨率的来源影像')
+  if (!(uploadForm.frequencyBand.trim() || source?.frequencyBand)) return void ElMessage.warning('请填写频段或选择有频段的来源影像')
   uploading.value = true
   try {
     const sample = await buildLocalSamplePayload(uploadForm.file)
     await samplesRepo.put(sample)
     await reload()
     uploadVisible.value = false
-    ElMessage.success('本地样本上传成功')
+    ElMessage.success('样本已导入或使用已有记录')
     resetUploadForm()
   } catch (e: any) {
+    if (e instanceof ImportCancelledError) return
     ElMessage.error(e?.message ? `样本上传失败：${e.message}` : '样本上传失败')
   } finally {
     uploading.value = false
@@ -538,6 +592,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.batch-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.batch-scope > span { color: #909399; font-size: 12px; }
 .header-actions {
     display: flex;
     justify-content: space-between;
@@ -573,6 +629,10 @@ onUnmounted(() => {
     color: #606266;
     font-size: 13px;
     line-height: 22px;
+}
+
+.sample-preview-image {
+    background: repeating-conic-gradient(#e7e7e7 0% 25%, #fff 0% 50%) 0 / 20px 20px;
 }
 
 .selected-file {

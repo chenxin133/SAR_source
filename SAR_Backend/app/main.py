@@ -13,7 +13,7 @@ from app.metrics import MetricsMiddleware, router as metrics_router
 from app.middleware import JsonLogMiddleware, RateLimitMiddleware, RequestIdMiddleware
 from app.models import Project
 from app.storage import ensure_bucket_exists
-from app.schema_updates import allow_samples_without_source
+from app.schema_updates import allow_samples_without_source, add_sample_import_metadata, add_scene_xml_metadata
 from pathlib import Path
 
 
@@ -58,6 +58,8 @@ def create_app() -> FastAPI:
             try:
                 Base.metadata.create_all(bind=db.get_bind())
                 allow_samples_without_source(db.get_bind())
+                add_sample_import_metadata(db.get_bind())
+                add_scene_xml_metadata(db.get_bind())
                 image_columns = {column["name"] for column in inspect(db.get_bind()).get_columns("images")}
                 if "frequency_band" not in image_columns:
                     db.execute(text("ALTER TABLE images ADD COLUMN frequency_band TEXT"))

@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
+from app.duplicate_files import DuplicateAction
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -30,6 +32,9 @@ class ImageUpdateRequest(BaseModel):
 
 
 class ImageOut(BaseModel):
+    metadata_xml_url: str | None = None
+    metadata_xml_filename: str | None = None
+    scene_metadata: dict | None = None
     id: uuid.UUID
     name: str
     size_bytes: int
@@ -75,6 +80,9 @@ class UploadInitResponse(BaseModel):
 
 
 class UploadCompleteRequest(BaseModel):
+    metadata_xml_base64: str | None = Field(default=None, max_length=2796212)
+    metadata_xml_filename: str | None = None
+    duplicate_action: DuplicateAction = "ask"
     total_parts: int
     name: str | None = None
     mime_type: str | None = None
@@ -88,3 +96,5 @@ class UploadCompleteRequest(BaseModel):
 
 class UploadCompleteResponse(BaseModel):
     image_id: uuid.UUID
+    reused: bool = False
+    updated: bool = False

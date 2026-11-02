@@ -1,3 +1,5 @@
+import { normalizeSatelliteName } from '../constants/satellites'
+import { ImportCancelledError } from '../utils/duplicateImport'
 import type { ImageMetadataPatch, SarImage, UploadPayload } from '../types/sar'
 import { getStorageMode } from '../config/storage'
 import { rawImagesRepo } from './rawImagesRepo'
@@ -34,7 +36,10 @@ const mapApiImageToSarImage = (img: ApiImageOut, thumbs?: ApiThumbnailOut[]): Sa
   return {
     id: String(img.id),
     name: img.name,
-    satellite: String(img.satellite ?? ''),
+    satellite: normalizeSatelliteName(String(img.satellite ?? '')),
+    metadataXmlUrl: img.metadata_xml_url || undefined,
+    metadataXmlFilename: img.metadata_xml_filename || undefined,
+    sceneMetadata: img.scene_metadata || undefined,
     acquisitionDate: String(img.acquisition_at ?? ''),
     fileSize: formatBytes(Number(img.size_bytes ?? 0)),
     sizeBytes: Number(img.size_bytes ?? 0),
@@ -185,7 +190,12 @@ export const imagesRepo = {
     const mode = getStorageMode()
     if (mode === 'local') return await rawImagesRepo.list()
 
-    const rows = await imagesApi.list({ limit: 200, offset: 0 })
+    const rows: ApiImageOut[] = []
+    for (let offset = 0; ; offset += 200) {
+      const page = await imagesApi.list({ limit: 200, offset })
+      rows.push(...page)
+      if (page.length < 200) break
+    }
     // 首屏列表只返回基础元数据，避免首次进入页面时被 N 次缩略图请求拖慢交互。
     // 已就绪影像会优先使用同源 preview URL，详情/预览再按需获取更多缩略图信息。
     return rows.map((img) => mapApiImageToSarImage(img))
@@ -227,6 +237,8 @@ export const imagesRepo = {
     onStage?.('正在校验并保存原始影像')
     const completed = await imagesApi.uploadComplete({
       upload_id: init.upload_id,
+      metadata_xml_base64: payload.metadataXmlBase64,
+      metadata_xml_filename: payload.metadataXmlFilename,
       total_parts: totalParts,
       name: payload.name || file.name,
       mime_type: file.type || undefined,
@@ -236,7 +248,15 @@ export const imagesRepo = {
       frequency_band: payload.frequencyBand || undefined,
       polarization: payload.polarization || undefined,
       description: payload.description || undefined
+    }).catch(async (error) => {
+      if (error instanceof ImportCancelledError) await imagesApi.cancelUpload(init.upload_id)
+      throw error
     })
+    if (completed.reused) {
+      const detail = await imagesApi.getDetail(completed.image_id)
+      setP(1)
+      return mapApiImageToSarImage(detail.image, detail.thumbnails)
+    }
 
     // 触发后端处理任务（70% ~ 100%）
     onStage?.('正在生成影像预览')

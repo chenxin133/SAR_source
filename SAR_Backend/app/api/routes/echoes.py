@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import hashlib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.deps import get_project
+from app.upload_filenames import storage_filename
+from app.duplicate_files import DuplicateAction, import_lock, reuse_duplicate
 from app.echo_service import (
     BAND_FREQUENCIES_GHZ, BANDWIDTH_HZ, MAX_ECHO_BYTES, PRF_HZ, SAMPLE_RATE_HZ,
     create_preview, pulse_preview, sha256_file, simulate_echo,
@@ -44,21 +47,32 @@ def find_echo(db: Session, project: Project, echo_id: uuid.UUID) -> EchoSignal:
 
 def save_echo(db: Session, project: Project, path: Path, *, name: str, filename: str, remark: str,
               source: str, byte_order: str, iq_offset: int, simulation: dict | None = None,
-              frequency_band: str | None = None, center_frequency_ghz: float | None = None) -> EchoSignal:
+              frequency_band: str | None = None, center_frequency_ghz: float | None = None,
+              checksum: str | None = None, existing: EchoSignal | None = None) -> EchoSignal:
     settings = get_settings()
     preview = path.with_suffix(".png")
     try:
         metadata = create_preview(path, preview, byte_order, iq_offset)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
-    echo_id = uuid.uuid4()
-    key = f"echoes/{project.id}/{echo_id}/signal.dat"
-    preview_key = f"echoes/{project.id}/{echo_id}/amplitude.png"
-    row = EchoSignal(id=echo_id, project_id=project.id, name=name, original_filename=filename,
-                     remark=remark, source=source, byte_order=byte_order, iq_offset=iq_offset,
-                     storage_key=key, preview_key=preview_key, size_bytes=path.stat().st_size,
-                     checksum_sha256=sha256_file(path), simulation=simulation, **metadata)
+    echo_id = existing.id if existing is not None else uuid.uuid4()
+    previous_keys = {existing.storage_key, existing.preview_key} if existing is not None else set()
+    stem = name[:-4] if name.lower().endswith('.dat') else name
+    filename_leaf = storage_filename(stem + '.dat')
+    key = f"echoes/{project.id}/{echo_id}/{filename_leaf}"
+    preview_key = f"echoes/{project.id}/{echo_id}/{Path(filename_leaf).stem}_amplitude.png"
+    if existing is None:
+        row = EchoSignal(id=echo_id, project_id=project.id, source=source, simulation=simulation, created_at=datetime.now(timezone.utc))
+    else:
+        row = existing
+    row.name, row.original_filename, row.remark = name, filename, remark
+    row.byte_order, row.iq_offset = byte_order, iq_offset
+    row.storage_key, row.preview_key = key, preview_key
+    row.size_bytes, row.checksum_sha256 = path.stat().st_size, checksum or sha256_file(path)
+    for field, value in metadata.items():
+        setattr(row, field, value)
     row.frequency_band, row.center_frequency_ghz = frequency_band, center_frequency_ghz
+    row.updated_at = datetime.now(timezone.utc)
     try:
         put_file(bucket=settings.s3_bucket, key=key, file_path=str(path), content_type="application/octet-stream")
         put_file(bucket=settings.s3_bucket, key=preview_key, file_path=str(preview), content_type="image/png")
@@ -67,9 +81,11 @@ def save_echo(db: Session, project: Project, path: Path, *, name: str, filename:
         db.refresh(row)
     except Exception:
         db.rollback()
-        delete_object(bucket=settings.s3_bucket, key=key)
-        delete_object(bucket=settings.s3_bucket, key=preview_key)
+        for failed_key in {key, preview_key} - previous_keys:
+            delete_object(bucket=settings.s3_bucket, key=failed_key)
         raise
+    for old_key in previous_keys - {key, preview_key}:
+        delete_object(bucket=settings.s3_bucket, key=old_key)
     return row
 
 
@@ -94,7 +110,7 @@ def list_echoes(request: Request, q: str = Query(default="", max_length=200),
 
 
 @router.post("/upload", response_model=Envelope[EchoOut], status_code=201)
-def upload_echo(request: Request, file: UploadFile = File(...), name: str = Form(default="", max_length=200),
+def upload_echo(request: Request, duplicate_action: DuplicateAction = Form(default="ask"), file: UploadFile = File(...), name: str = Form(default="", max_length=200),
                 remark: str = Form(default="", max_length=2000),
                 byte_order: Literal["little", "big"] = Form(default="little"),
                 iq_offset: int = Form(default=32768),
@@ -110,14 +126,23 @@ def upload_echo(request: Request, file: UploadFile = File(...), name: str = Form
         try:
             with path.open("wb") as stream:
                 size = 0
+                digest = hashlib.sha256()
                 while block := file.file.read(1024 * 1024):
                     size += len(block)
                     if size > MAX_ECHO_BYTES:
                         raise HTTPException(413, "回波文件不能超过 64 MiB")
                     stream.write(block)
-            row = save_echo(db, project, path, name=name.strip() or filename[:200], filename=filename,
-                            remark=remark, source="imported", byte_order=byte_order, iq_offset=iq_offset,
-                            frequency_band=frequency_band or None)
+                    digest.update(block)
+            checksum = digest.hexdigest()
+            with import_lock:
+                existing = db.scalar(select(EchoSignal).where(
+                    EchoSignal.project_id == project.id, EchoSignal.checksum_sha256 == checksum,
+                ).order_by(EchoSignal.created_at, EchoSignal.id))
+                if reuse_duplicate(existing, duplicate_action) and duplicate_action == 'reuse':
+                    return Envelope(data=output(existing), request_id=getattr(request.state, "request_id", None))
+                row = save_echo(db, project, path, name=name.strip() or filename[:200], filename=filename,
+                                remark=remark, source="imported", byte_order=byte_order, iq_offset=iq_offset,
+                                frequency_band=frequency_band or None, checksum=checksum, existing=existing if duplicate_action == 'update' else None)
         finally:
             file.file.close()
     return Envelope(data=output(row), request_id=getattr(request.state, "request_id", None))
@@ -170,10 +195,25 @@ def download(echo_id: uuid.UUID, db: Session = Depends(get_db), project: Project
 def edit(echo_id: uuid.UUID, payload: EchoEdit,
          db: Session = Depends(get_db), project: Project = Depends(get_project)):
     row = find_echo(db, project, echo_id)
+    previous = {row.storage_key, row.preview_key}
+    if row.name != payload.name:
+        stem = payload.name[:-4] if payload.name.lower().endswith('.dat') else payload.name
+        leaf = storage_filename(stem + '.dat')
+        folder = f'echoes/{project.id}/{row.id}'
+        keys = (f'{folder}/{leaf}', f'{folder}/{Path(leaf).stem}_amplitude.png')
+        with tempfile.TemporaryDirectory() as tmp:
+            for old, new, mime in ((row.storage_key, keys[0], 'application/octet-stream'), (row.preview_key, keys[1], 'image/png')):
+                if old != new:
+                    path = str(Path(tmp) / Path(old).name)
+                    download_object_to_file(bucket=get_settings().s3_bucket, key=old, file_path=path)
+                    put_file(bucket=get_settings().s3_bucket, key=new, file_path=path, content_type=mime)
+        row.storage_key, row.preview_key = keys
     row.name, row.remark = payload.name, payload.remark
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
+    for old in previous - {row.storage_key, row.preview_key}:
+        delete_object(bucket=get_settings().s3_bucket, key=old)
     return Envelope(data=output(row))
 
 

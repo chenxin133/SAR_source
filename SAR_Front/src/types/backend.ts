@@ -8,6 +8,9 @@ export const unwrapEnvelope = <T>(value: ApiEnvelope<T>): T => {
 }
 
 export type ApiImageOut = {
+  metadata_xml_url?: string | null
+  metadata_xml_filename?: string | null
+  scene_metadata?: import('./metadata').SceneMetadata | null
   id: string
   name: string
   size_bytes: number
@@ -44,6 +47,8 @@ export type ApiUploadInitResponse = {
 }
 
 export type ApiUploadCompleteResponse = {
+  reused?: boolean
+  updated?: boolean
   image_id: string
 }
 

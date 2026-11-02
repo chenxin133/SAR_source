@@ -8,6 +8,12 @@ export type SarSample = {
   annotationId: string
   annotationType: AnnotationType
   category: string
+  frequencyBand?: string
+  sequenceNo?: number
+  metadataXmlUrl?: string
+  metadataXmlFile?: File
+  sceneMetadata?: import('./metadata').SceneMetadata
+  resolution?: string
   remark: string
   format: 'image/png' | 'image/jpeg' | 'image/tiff'
   width: number

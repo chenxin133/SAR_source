@@ -1,4 +1,9 @@
+import type { SceneMetadata } from './metadata'
+
 export interface SarImage {
+  metadataXmlUrl?: string;
+  metadataXmlFilename?: string;
+  sceneMetadata?: SceneMetadata;
   id: string;
   name: string;
   satellite: string;
@@ -26,6 +31,8 @@ export type ImageMetadataPatch = Partial<Pick<SarImage,
 >>;
 
 export interface UploadPayload {
+  metadataXmlBase64?: string;
+  metadataXmlFilename?: string;
   name: string;
   satellite: string;
   file: File;

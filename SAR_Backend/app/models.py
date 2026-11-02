@@ -46,6 +46,9 @@ class Image(Base):
 
     name: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str | None] = mapped_column(Text)
+    metadata_xml_key: Mapped[str | None] = mapped_column(Text)
+    metadata_xml_filename: Mapped[str | None] = mapped_column(Text)
+    scene_metadata: Mapped[dict | None] = mapped_column(JsonType)
     mime_type: Mapped[str | None] = mapped_column(Text)
     satellite: Mapped[str | None] = mapped_column(Text)
     acquisition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -160,6 +163,12 @@ class Sample(Base):
     category: Mapped[str | None] = mapped_column(Text)
     remark: Mapped[str | None] = mapped_column(Text)
     roi: Mapped[dict | None] = mapped_column(JsonType)
+    resolution: Mapped[str | None] = mapped_column(Text)
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64))
+    frequency_band: Mapped[str | None] = mapped_column(Text)
+    sequence_no: Mapped[int | None] = mapped_column(Integer)
+    metadata_xml_key: Mapped[str | None] = mapped_column(Text)
+    scene_metadata: Mapped[dict | None] = mapped_column(JsonType)
     crop_storage_key: Mapped[str | None] = mapped_column(Text)
     thumb_storage_key: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -183,6 +192,8 @@ class Sample(Base):
         ),
         Index("ix_samples_image", "project_id", "image_id"),
         Index("ix_samples_project_created_at", "project_id", "created_at"),
+        Index("ix_samples_project_checksum", "project_id", "checksum_sha256"),
+        Index("ux_samples_project_sequence", "project_id", "sequence_no", unique=True),
         Index("ix_samples_category", "project_id", "category"),
     )
 

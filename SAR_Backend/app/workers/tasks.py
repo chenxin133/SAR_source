@@ -184,12 +184,17 @@ def _read_preview_with_pillow(path: str, max_size: int) -> np.ndarray:
         raise RuntimeError("Pillow not available") from e
 
     with PILImage.open(path) as img:
+        numeric = img.mode in ('F', 'I') or img.mode.startswith('I;16')
+        if img.mode.startswith('I;16'):
+            # Pillow cannot bilinearly resize I;16. Float preserves every
+            # uint16 value, unlike an RGB conversion that clips above 255.
+            img = img.convert('F')
         try:
             img.draft("RGB", (max_size, max_size))
         except Exception:
             pass
         img.thumbnail((max_size, max_size), resample=PILImage.Resampling.BILINEAR)
-        if img.mode not in ("RGB", "L"):
+        if not numeric and img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
         arr = np.asarray(img)
     return _normalize_raster_shape(arr)

@@ -1,3 +1,4 @@
+import { withDuplicateChoice } from '../utils/duplicateImport'
 import { buildUrl, requestJson } from './http'
 import type {
   ApiEnvelope,
@@ -81,6 +82,8 @@ export const imagesApi = {
 
   async uploadComplete(payload: {
     upload_id: string
+    metadata_xml_base64?: string
+    metadata_xml_filename?: string
     total_parts: number
     name?: string
     mime_type?: string
@@ -91,11 +94,14 @@ export const imagesApi = {
     polarization?: string
     description?: string
   }): Promise<ApiUploadCompleteResponse> {
-    const res = await requestJson<ApiEnvelope<ApiUploadCompleteResponse>>(
+    const res = await withDuplicateChoice((action) => requestJson<ApiEnvelope<ApiUploadCompleteResponse>>(
       `/images/upload/${encodeURIComponent(payload.upload_id)}/complete`,
       {
         method: 'POST',
         body: JSON.stringify({
+          duplicate_action: action,
+          metadata_xml_base64: payload.metadata_xml_base64,
+          metadata_xml_filename: payload.metadata_xml_filename,
           total_parts: payload.total_parts,
           name: payload.name,
           mime_type: payload.mime_type,
@@ -107,8 +113,12 @@ export const imagesApi = {
           description: payload.description
         })
       }
-    )
+    ))
     return unwrapEnvelope(res)
+  },
+
+  async cancelUpload(uploadId: string): Promise<void> {
+    await requestJson(`/images/upload/${encodeURIComponent(uploadId)}`, { method: 'DELETE' })
   },
 
   async process(imageId: string): Promise<{ task_id: string }> {

@@ -55,3 +55,60 @@ def allow_samples_without_source(engine: Engine) -> None:
         finally:
             connection.exec_driver_sql(f"PRAGMA foreign_keys={int(bool(foreign_keys))}")
             connection.commit()
+
+
+def add_sample_import_metadata(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("samples")}
+        missing = {"resolution": "TEXT", "checksum_sha256": "VARCHAR(64)"}.keys() - columns
+        if not missing:
+            return
+        database = connection.exec_driver_sql("PRAGMA database_list").fetchone()[2]
+        if database:
+            backup = Path(database + ".before-sample-import-metadata.bak")
+            if not backup.exists():
+                temporary = backup.with_suffix(backup.suffix + ".tmp")
+                try:
+                    with closing(sqlite3.connect(str(temporary))) as destination:
+                        connection.connection.driver_connection.backup(destination)
+                    os.replace(temporary, backup)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        for name in sorted(missing):
+            sql_type = "TEXT" if name == "resolution" else "VARCHAR(64)"
+            connection.exec_driver_sql(f"ALTER TABLE samples ADD COLUMN {name} {sql_type}")
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_samples_project_checksum ON samples(project_id, checksum_sha256)"
+        )
+
+
+def add_scene_xml_metadata(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+    definitions = {
+        "images": {"metadata_xml_key": "TEXT", "metadata_xml_filename": "TEXT", "scene_metadata": "JSON"},
+        "samples": {"frequency_band": "TEXT", "sequence_no": "INTEGER", "metadata_xml_key": "TEXT", "scene_metadata": "JSON"},
+    }
+    with engine.begin() as connection:
+        missing = {table: {name: kind for name, kind in fields.items() if name not in
+                   {column["name"] for column in inspect(connection).get_columns(table)}}
+                   for table, fields in definitions.items()}
+        if not any(missing.values()):
+            return
+        database = connection.exec_driver_sql("PRAGMA database_list").fetchone()[2]
+        if database:
+            backup = Path(database + ".before-scene-xml-metadata.bak")
+            if not backup.exists():
+                temporary = backup.with_suffix(backup.suffix + ".tmp")
+                try:
+                    with closing(sqlite3.connect(str(temporary))) as destination:
+                        connection.connection.driver_connection.backup(destination)
+                    os.replace(temporary, backup)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        for table, fields in missing.items():
+            for name, kind in fields.items():
+                connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+        connection.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS ux_samples_project_sequence ON samples(project_id, sequence_no)")

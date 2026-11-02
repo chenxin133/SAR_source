@@ -97,6 +97,28 @@ def test_build_preview_rgb_falls_back_to_pillow(monkeypatch):
     assert rgb.dtype == np.uint8
 
 
+@pytest.mark.parametrize('dtype', [np.float32, np.uint16, np.int32])
+def test_lzw_numeric_tiff_pillow_fallback_stretches_before_uint8_conversion(tmp_path, monkeypatch, dtype):
+    from PIL import Image as PILImage
+    import tifffile
+    values = (np.arange(80 * 120).reshape(80, 120) + 1000).astype(dtype)
+    path = tmp_path / 'numeric-lzw.tif'
+    PILImage.fromarray(values).save(path, compression='tiff_lzw')
+    with tifffile.TiffFile(path) as opened:
+        assert int(opened.pages[0].compression) == 5
+    original = path.read_bytes()
+    monkeypatch.setattr(tasks, '_read_preview_with_gdal', lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError('no gdal')))
+    monkeypatch.setattr(tasks, '_read_preview_with_tifffile', lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError('requires imagecodecs')))
+    decoded = tasks._read_preview_with_pillow(str(path), max_size=60)
+    assert np.percentile(decoded, 50) > 255
+    rgb = tasks._build_preview_rgb(str(path), max_size=60)
+    assert rgb.shape == (40, 60, 3)
+    assert len(np.unique(rgb[..., 0])) > 100
+    assert 80 < np.median(rgb[..., 0]) < 180
+    assert np.mean(rgb[..., 0] >= 250) < .1
+    assert path.read_bytes() == original
+
+
 def test_sample_raster_for_preview_downsamples_2d():
     arr = np.arange(100, dtype=np.float32).reshape(10, 10)
     sampled = tasks._sample_raster_for_preview(arr, max_size=4)

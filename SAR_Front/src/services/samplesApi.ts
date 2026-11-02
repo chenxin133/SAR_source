@@ -1,4 +1,5 @@
-import { buildUrl, requestJson } from './http'
+import { withDuplicateChoice } from '../utils/duplicateImport'
+import { buildUrl, requestJson, readResponseError } from './http'
 import { unwrapEnvelope, type ApiEnvelope } from '../types/backend'
 import type { SarSample } from '../types/samples'
 
@@ -8,6 +9,11 @@ type ApiSample = {
   name?: string | null
   category?: string | null
   remark?: string | null
+  frequency_band?: string | null
+  sequence_no?: number | null
+  metadata_xml_url?: string | null
+  scene_metadata?: import('../types/metadata').SceneMetadata | null
+  resolution?: string | null
   roi?: Record<string, unknown> | null
   image_url?: string | null
   thumbnail_url?: string | null
@@ -36,6 +42,11 @@ const mapSample = async (row: ApiSample): Promise<SarSample> => {
     annotationType: roi.annotationType === 'polygon' ? 'polygon' : 'rect',
     category: row.category || '',
     remark: row.remark || '',
+    resolution: row.resolution || '',
+    frequencyBand: row.frequency_band || '',
+    sequenceNo: row.sequence_no || undefined,
+    metadataXmlUrl: row.metadata_xml_url || undefined,
+    sceneMetadata: row.scene_metadata || undefined,
     format: roi.format === 'image/tiff' ? 'image/tiff' : roi.format === 'image/jpeg' ? 'image/jpeg' : 'image/png',
     width: Number(roi.width ?? 0),
     height: Number(roi.height ?? 0),
@@ -48,16 +59,25 @@ const mapSample = async (row: ApiSample): Promise<SarSample> => {
 
 export const samplesApi = {
   async list(): Promise<SarSample[]> {
-    const res = await requestJson<ApiEnvelope<ApiSample[]>>('/samples?limit=200', { method: 'GET' })
-    return await Promise.all(unwrapEnvelope(res).map(mapSample))
+    const rows: ApiSample[] = []
+    for (let offset = 0; ; offset += 200) {
+      const res = await requestJson<ApiEnvelope<ApiSample[]>>(`/samples?limit=200&offset=${offset}`, { method: 'GET' })
+      const page = unwrapEnvelope(res)
+      rows.push(...page)
+      if (page.length < 200) break
+    }
+    return await Promise.all(rows.map(mapSample))
   },
 
   async put(sample: SarSample): Promise<SarSample> {
     const form = new FormData()
     if (sample.imageId) form.append('image_id', sample.imageId)
     form.append('name', sample.name)
+    if (sample.frequencyBand) form.append('frequency_band', sample.frequencyBand)
+    if (sample.metadataXmlFile) form.append('metadata_xml', sample.metadataXmlFile, sample.metadataXmlFile.name)
     form.append('category', sample.category)
     form.append('remark', sample.remark)
+    if (sample.resolution) form.append('resolution', sample.resolution)
     form.append('annotation_id', sample.annotationId)
     form.append('annotation_type', sample.annotationType)
     form.append('image_name', sample.imageName || '')
@@ -69,9 +89,10 @@ export const samplesApi = {
     form.append('image', sample.image, imageFilename)
     if (sample.thumbnail) form.append('thumbnail', sample.thumbnail, 'thumbnail.png')
 
-    const resp = await fetch(buildUrl('/samples/upload'), { method: 'POST', body: form })
-    if (!resp.ok) throw new Error((await resp.text().catch(() => '')) || `HTTP ${resp.status}`)
-    const row = unwrapEnvelope((await resp.json()) as ApiEnvelope<ApiSample>)
+    const row = unwrapEnvelope(await withDuplicateChoice((action) => {
+      form.set('duplicate_action', action)
+      return requestJson<ApiEnvelope<ApiSample>>('/samples/upload', { method: 'POST', body: form })
+    }))
     return await mapSample(row)
   },
 
@@ -111,10 +132,20 @@ export const samplesApi = {
     return await mapSample(unwrapEnvelope(res))
   },
 
-  async exportBlob(id: string, format: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff'): Promise<Blob> {
+  async exportBundle(ids: string[], format: string, targetResolution?: number): Promise<Blob> {
+    const response = await fetch(buildUrl('/samples/export'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sample_ids: ids, format, target_resolution: targetResolution })
+    })
+    if (!response.ok) throw await readResponseError(response)
+    return await response.blob()
+  },
+
+  async exportBlob(id: string, format: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff', targetResolution?: number): Promise<Blob> {
     const params = new URLSearchParams({ format })
+    if (targetResolution != null) params.set('target_resolution', String(targetResolution))
     const resp = await fetch(buildUrl(`/samples/${encodeURIComponent(id)}/export?${params}`))
-    if (!resp.ok) throw new Error((await resp.text().catch(() => '')) || `HTTP ${resp.status}`)
+    if (!resp.ok) throw await readResponseError(resp)
     return await resp.blob()
   }
 }

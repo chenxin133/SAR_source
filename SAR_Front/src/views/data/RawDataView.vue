@@ -13,11 +13,7 @@
     <div class="filter-bar">
       <el-input v-model="keyword" placeholder="筛选名称 / ID" clearable style="width: 240px" />
       <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
-        <el-option label="待处理" value="pending" />
-        <el-option label="处理中" value="processing" />
-        <el-option label="已上传" value="uploaded" />
-        <el-option label="已就绪" value="ready" />
-        <el-option label="失败" value="failed" />
+        <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
       <el-select v-model="satelliteFilter" placeholder="全部卫星源" clearable style="width: 180px">
         <el-option v-for="item in satelliteOptions" :key="item" :label="item" :value="item" />
@@ -30,6 +26,9 @@
       </el-select>
       <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
         <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="resolutionFilter" placeholder="全部分辨率" clearable filterable style="width: 180px">
+        <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
       </el-select>
     </div>
 
@@ -45,6 +44,9 @@
       <el-table-column prop="name" label="影像名称" min-width="200" />
       <el-table-column v-if="!isBackendMode" prop="satellite" label="卫星源" width="150" />
       <el-table-column prop="acquisitionDate" label="采集时间" width="180" />
+      <el-table-column label="分辨率" width="140">
+        <template #default="{ row }">{{ resolutionLabel(row.resolution) }}</template>
+      </el-table-column>
       <el-table-column prop="fileSize" label="大小" width="120" />
       <el-table-column prop="status" label="状态" width="100">
         <template #default="scope">
@@ -136,7 +138,7 @@ import RawImageDetails from '../../components/raw/RawImageDetails.vue'
 import { getStorageMode } from '../../config/storage'
 import { exportLocalDataPackage } from '../../utils/migrationExport'
 import { unpackImageDescription } from '../../utils/imageMetadata'
-import { buildPolarizationOptions } from '../../constants/polarizations'
+import { buildResolutionOptions, resolutionKey, resolutionLabel } from '../../utils/resolution'
 
 const store = useRawDataStore()
 const router = useRouter()
@@ -147,6 +149,7 @@ const satelliteFilter = ref('')
 const regionFilter = ref('')
 const frequencyBandFilter = ref('')
 const polarizationFilter = ref('')
+const resolutionFilter = ref('')
 
 const normalizeFilterValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
 
@@ -160,10 +163,17 @@ const buildUniqueOptions = (values: Array<string | undefined | null>) => {
     ).sort((a, b) => a.localeCompare(b, 'zh-CN'))
 }
 
-const satelliteOptions = computed(() => buildUniqueOptions(store.images.map((img) => img.satellite)))
-const regionOptions = computed(() => buildUniqueOptions(store.images.map((img) => unpackImageDescription(img.description).region)))
-const frequencyBandOptions = ['Ka', 'Ku', 'X', 'C']
-const polarizationOptions = computed(() => buildPolarizationOptions(store.images.map((img) => img.polarization)))
+type ImageFilter = 'status' | 'satellite' | 'region' | 'resolution' | 'frequencyBand' | 'polarization'
+const statusOptions = computed(() => {
+    const available = new Set(filterImages('status').map(img => img.status))
+    return [{ value: 'pending', label: '待处理' }, { value: 'processing', label: '处理中' },
+        { value: 'uploaded', label: '已上传' }, { value: 'ready', label: '已就绪' }, { value: 'failed', label: '失败' }].filter(item => available.has(item.value as SarImage['status']))
+})
+const satelliteOptions = computed(() => buildUniqueOptions(filterImages('satellite').map(img => img.satellite)))
+const regionOptions = computed(() => buildUniqueOptions(filterImages('region').map(img => unpackImageDescription(img.description).region)))
+const resolutionOptions = computed(() => buildResolutionOptions(filterImages('resolution').map(img => img.resolution)))
+const frequencyBandOptions = computed(() => buildUniqueOptions(filterImages('frequencyBand').map(img => img.frequencyBand)))
+const polarizationOptions = computed(() => buildUniqueOptions(filterImages('polarization').map(img => img.polarization)))
 
 const getImageRegion = (img?: SarImage | null) => unpackImageDescription(img?.description).region
 const getImageRemark = (img?: SarImage | null) => unpackImageDescription(img?.description).remark
@@ -172,7 +182,7 @@ onMounted(() => {
     store.fetchImages()
 })
 
-const filteredImages = computed(() => {
+const filterImages = (omit?: ImageFilter) => {
     const keywordValue = normalizeFilterValue(keyword.value)
     const statusValue = normalizeFilterValue(statusFilter.value)
     const satelliteValue = normalizeFilterValue(satelliteFilter.value)
@@ -193,17 +203,19 @@ const filteredImages = computed(() => {
             nameValue.includes(keywordValue) ||
             descriptionValue.includes(keywordValue) ||
             regionText.includes(keywordValue)
-        const matchStatus = !statusValue || String(img.status || '').toLowerCase() === statusValue
-        const matchSatellite = !satelliteValue || satelliteText === satelliteValue
-        const matchRegion = !regionValue || regionText === regionValue
-        const matchFrequencyBand = !frequencyBandValue || frequencyBandText === frequencyBandValue
-        const matchPolarization = !polarizationValue || polarizationText === polarizationValue
-        return matchKeyword && matchStatus && matchSatellite && matchRegion && matchFrequencyBand && matchPolarization
+        const matchStatus = omit === 'status' || !statusValue || String(img.status || '').toLowerCase() === statusValue
+        const matchSatellite = omit === 'satellite' || !satelliteValue || satelliteText === satelliteValue
+        const matchRegion = omit === 'region' || !regionValue || regionText === regionValue
+        const matchFrequencyBand = omit === 'frequencyBand' || !frequencyBandValue || frequencyBandText === frequencyBandValue
+        const matchPolarization = omit === 'polarization' || !polarizationValue || polarizationText === polarizationValue
+        return (omit === 'resolution' || !resolutionFilter.value || resolutionKey(img.resolution) === resolutionFilter.value) && matchKeyword && matchStatus && matchSatellite && matchRegion && matchFrequencyBand && matchPolarization
     })
-})
+}
+const filteredImages = computed(() => filterImages())
 const hasActiveFilters = computed(() => {
     return [
         keyword.value,
+        resolutionFilter.value,
         statusFilter.value,
         satelliteFilter.value,
         regionFilter.value,

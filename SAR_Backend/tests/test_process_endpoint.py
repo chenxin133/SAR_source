@@ -12,7 +12,7 @@ def test_process_creates_task_id(client, monkeypatch):
     client.put(f"/api/v1/images/upload/{upload_id}/part/1", data=b"12345")
     done = client.post(
         f"/api/v1/images/upload/{upload_id}/complete",
-        json={"total_parts": 1, "name": "a.tif", "mime_type": "image/tiff"},
+        json={"resolution": "1m", "total_parts": 1, "name": "a.tif", "mime_type": "image/tiff"},
     )
     image_id = done.json()["data"]["image_id"]
 

@@ -33,7 +33,7 @@ vi.mock('../../../repositories/annotationsRepo', () => ({
 }))
 vi.mock('../../../repositories/samplesRepo', () => ({ samplesRepo: {} }))
 vi.mock('element-plus', () => ({
-  ElMessage: { success: vi.fn(), error: vi.fn() },
+  ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
   ElMessageBox: {}
 }))
 vi.mock('fabric', async (importOriginal) => {
@@ -55,7 +55,7 @@ vi.mock('fabric', async (importOriginal) => {
     getHeight() { return this.height }
     calcOffset() {}
     setViewportTransform(matrix: number[]) { this.viewportTransform = matrix }
-    requestRenderAll() {}
+    requestRenderAll() { this.handlers.get('after:render')?.({}) }
     getObjects() { return [...this.objects] }
     add(object: any) {
       if (!this.objects.includes(object)) this.objects.push(object)
@@ -103,7 +103,7 @@ async function openView(rotation: number) {
       stubs: Object.fromEntries([
         'el-select', 'el-option', 'el-button-group', 'el-button', 'el-icon', 'el-switch', 'el-slider',
         'el-checkbox', 'el-table', 'el-table-column', 'el-form', 'el-form-item', 'el-input', 'el-empty',
-        'el-dialog', 'Pointer', 'Crop', 'Connection'
+        'el-input-number', 'el-dialog', 'Pointer', 'Crop', 'Connection'
       ].map((name) => [name, true])),
       directives: { loading: () => {} }
     }
@@ -147,6 +147,7 @@ describe('rectangle drawing on a rotated image', () => {
     emitPointer('mouse:move', end.x, end.y)
     expectHorizontalRectangle(drawingRectangle(), start, end)
     emitPointer('mouse:up', end.x, end.y)
+    vm.metaDraft.category = '测试类别'
     await vm.confirmMeta()
     await vm.saveToLocal()
     expect(state.saved?.annotations).toHaveLength(1)
@@ -177,5 +178,144 @@ describe('rectangle drawing on a rotated image', () => {
     emitPointer('mouse:move', 620, 210)
     emitPointer('mouse:up', 620, 210)
     expect(drawingRectangle()).toBeUndefined()
+  })
+})
+
+describe('square drawing and exact source-pixel dimensions', () => {
+  it.each([0, 25, 90, 135, 270])('constrains Shift to a square at %s degrees and preserves edited dimensions through save/reload', async (rotation) => {
+    const vm = await openView(rotation)
+    vm.setTool('rect')
+    emitPointer('mouse:down', 300, 240)
+    state.canvas.handlers.get('mouse:move')({ e: new MouseEvent('mousemove', { clientX: 380, clientY: 280, shiftKey: true }) })
+    expect(vm.sizeOverlay.width).toBeCloseTo(vm.sizeOverlay.height, 8)
+    expect(vm.sizeOverlay.width).toBeCloseTo(160, 8)
+    emitPointer('mouse:up', 380, 280)
+    expect(vm.metaDialogVisible).toBe(true)
+    expect(vm.tool).toBe('select')
+    vm.startSizeEdit()
+    vm.sizeDraft = { width: 112, height: 96 }
+    vm.applySizeEdit()
+    expect(vm.sizeOverlay.width).toBeCloseTo(112, 8)
+    expect(vm.sizeOverlay.height).toBeCloseTo(96, 8)
+    vm.metaDraft.category = '舰船'
+    await vm.confirmMeta()
+    await vm.saveToLocal()
+    await vm.loadForImage('rotation-test')
+    const annotation = state.saved!.annotations[0]
+    expect(annotation.type).toBe('rect')
+    if (annotation.type !== 'rect') throw new Error('Expected rectangle')
+    const points = annotation.points!
+    if ([0, 90, 270].includes(rotation)) {
+      for (const point of points) {
+        expect(point.x).toBe(Math.round(point.x)); expect(point.y).toBe(Math.round(point.y))
+      }
+    }
+    expect(Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y)).toBeCloseTo(112, 8)
+    expect(Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y)).toBeCloseTo(96, 8)
+    vm.selectAnnotation(annotation.id)
+    vm.updateSizeOverlay()
+    expect(vm.sizeOverlay.width).toBeCloseTo(112, 8)
+    expect(vm.sizeOverlay.height).toBeCloseTo(96, 8)
+  })
+
+  it('updates a stationary drag when Shift is pressed and released and cancels an unfinished draft', async () => {
+    const vm = await openView(25)
+    vm.setTool('rect')
+    emitPointer('mouse:down', 500, 400)
+    emitPointer('mouse:move', 440, 370)
+    expect(vm.sizeOverlay.width).toBeCloseTo(120)
+    expect(vm.sizeOverlay.height).toBeCloseTo(60)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }))
+    expect(vm.sizeOverlay.width).toBeCloseTo(vm.sizeOverlay.height)
+    document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }))
+    expect(vm.sizeOverlay.height).toBeCloseTo(60)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(vm.isDrawingSize).toBe(false)
+    expect(drawingRectangle()).toBeUndefined()
+  })
+
+  it('keeps the unfinished shape editable until a category is entered, then remembers the category', async () => {
+    const vm = await openView(0)
+    vm.setTool('rect')
+    emitPointer('mouse:down', 300, 200); emitPointer('mouse:move', 400, 300); emitPointer('mouse:up', 400, 300)
+    await vm.confirmMeta()
+    expect(vm.annotations).toHaveLength(0)
+    expect(vm.metaDialogVisible).toBe(true)
+    const input = document.createElement('input'); input.value = '车辆'
+    vm.onCategoryQueryInput({ target: input })
+    await vm.confirmMeta()
+    expect(vm.annotations).toHaveLength(1)
+    vm.setTool('rect')
+    emitPointer('mouse:down', 400, 300); emitPointer('mouse:move', 500, 400); emitPointer('mouse:up', 500, 400)
+    expect(vm.metaDraft.category).toBe('车辆')
+    vm.cancelMeta()
+    expect(vm.annotations).toHaveLength(1)
+  })
+
+  it('pans with the middle button without moving the draft or creating an annotation, and stops on release or blur', async () => {
+    const vm = await openView(0)
+    vm.setTool('rect')
+    const middle = (event: string, x: number, y: number) => state.canvas.handlers.get(event)({
+      e: new MouseEvent(event, { button: 1, clientX: x, clientY: y, cancelable: true })
+    })
+    const initialPan = { ...vm.viewPan }
+    middle('mouse:down', 100, 120); middle('mouse:move', 160, 150); middle('mouse:up', 160, 150)
+    expect(vm.viewPan).toEqual({ x: initialPan.x + 60, y: initialPan.y + 30 })
+    expect(drawingRectangle()).toBeUndefined()
+    emitPointer('mouse:down', 300, 200); emitPointer('mouse:move', 400, 300); emitPointer('mouse:up', 400, 300)
+    const draft = drawingRectangle(), corners = draft.getCoords()
+    middle('mouse:down', 350, 250); middle('mouse:move', 390, 290)
+    expect(draft.getCoords()).toEqual(corners)
+    window.dispatchEvent(new Event('blur'))
+    const stoppedPan = { ...vm.viewPan }
+    emitPointer('mouse:move', 420, 310)
+    expect(vm.viewPan).toEqual(stoppedPan)
+    expect(vm.annotations).toHaveLength(0)
+    expect(vm.metaDialogVisible).toBe(true)
+  })
+
+  it('edits the dimension badge inline, tabs between fields, confirms on leaving, and cancels with Escape', async () => {
+    const vm = await openView(0)
+    vm.setTool('rect')
+    emitPointer('mouse:down', 300, 200); emitPointer('mouse:move', 400, 300); emitPointer('mouse:up', 400, 300)
+    await nextTick()
+    expect(wrapper!.find('.canvas-wrap .annotation-draft').exists()).toBe(false)
+    expect(wrapper!.find('.sidebar .annotation-draft').exists()).toBe(true)
+    await wrapper!.get('[data-testid="annotation-size"]').trigger('click')
+    expect(wrapper!.find('.size-editor').exists()).toBe(false)
+    const width = wrapper!.get('input[aria-label="标注宽度"]'), height = wrapper!.get('input[aria-label="标注高度"]')
+    await width.setValue('112'); await height.setValue('96')
+    await width.trigger('focusout', { relatedTarget: height.element })
+    expect(vm.sizeEditing).toBe(true)
+    await height.trigger('focusout', { relatedTarget: null })
+    expect(vm.sizeEditing).toBe(false)
+    expect(vm.sizeOverlay.width).toBeCloseTo(112)
+    expect(vm.sizeOverlay.height).toBeCloseTo(96)
+    await wrapper!.get('[data-testid="annotation-size"]').trigger('click')
+    await wrapper!.get('input[aria-label="标注宽度"]').setValue('180')
+    await wrapper!.get('input[aria-label="标注宽度"]').trigger('keydown', { key: 'Escape' })
+    expect(vm.metaDialogVisible).toBe(true)
+    expect(vm.sizeEditing).toBe(false)
+    expect(vm.sizeOverlay.width).toBeCloseTo(112)
+  })
+
+  it('confirms inline sizes with Enter and retains the old shape for invalid or out-of-image values', async () => {
+    const vm = await openView(0)
+    vm.setTool('rect')
+    emitPointer('mouse:down', 300, 200); emitPointer('mouse:move', 400, 300); emitPointer('mouse:up', 400, 300)
+    await nextTick()
+    await wrapper!.get('[data-testid="annotation-size"]').trigger('click')
+    await wrapper!.get('input[aria-label="标注宽度"]').setValue('0')
+    await wrapper!.get('input[aria-label="标注宽度"]').trigger('keydown', { key: 'Enter' })
+    expect(vm.sizeEditing).toBe(true)
+    expect(vm.sizeOverlay.width).toBeCloseTo(200)
+    vm.sizeDraft.width = 10000
+    expect(vm.applySizeEdit()).toBe(false)
+    expect(vm.sizeOverlay.width).toBeCloseTo(200)
+    await wrapper!.get('input[aria-label="标注宽度"]').setValue('120')
+    await wrapper!.get('input[aria-label="标注宽度"]').trigger('keydown', { key: 'Enter' })
+    expect(vm.sizeEditing).toBe(false)
+    expect(vm.sizeOverlay.width).toBeCloseTo(120)
+    expect(vm.metaDialogVisible).toBe(true)
   })
 })

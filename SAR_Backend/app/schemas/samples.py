@@ -11,6 +11,8 @@ class SampleCreateRequest(BaseModel):
     name: str | None = None
     category: str | None = None
     remark: str | None = None
+    resolution: str | None = None
+    frequency_band: str | None = None
     roi: dict | None = None
     crop_storage_key: str | None = None
     thumb_storage_key: str | None = None
@@ -18,7 +20,7 @@ class SampleCreateRequest(BaseModel):
 
 class SampleCropRequest(BaseModel):
     image_id: uuid.UUID
-    name: str
+    name: str = ""
     category: str = ""
     remark: str = ""
     annotation_id: str
@@ -31,11 +33,16 @@ class SampleCropRequest(BaseModel):
 
 
 class SampleOut(BaseModel):
+    sequence_no: int | None = None
+    metadata_xml_url: str | None = None
+    scene_metadata: dict | None = None
     id: uuid.UUID
     image_id: uuid.UUID | None = None
     name: str | None = None
     category: str | None = None
     remark: str | None = None
+    resolution: str | None = None
+    frequency_band: str | None = None
     roi: dict | None = None
     crop_storage_key: str | None = None
     thumb_storage_key: str | None = None

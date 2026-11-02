@@ -21,7 +21,7 @@ def test_chunk_upload_flow(client, monkeypatch):
 
     done = client.post(
         f"/api/v1/images/upload/{upload_id}/complete",
-        json={"total_parts": 2, "name": "a.tif", "mime_type": "image/tiff", "frequency_band": "X"},
+        json={"resolution": "1m", "total_parts": 2, "name": "a.tif", "mime_type": "image/tiff", "frequency_band": "X"},
     )
     assert done.status_code == 200
     image_id = done.json()["data"]["image_id"]
@@ -45,14 +45,14 @@ def test_upload_keeps_filename_separate_from_display_name(client, db_session, tm
     }).json()["data"]["upload_id"]
     assert client.put(f"/api/v1/images/upload/{upload_id}/part/1", content=original).status_code == 200
     response = client.post(f"/api/v1/images/upload/{upload_id}/complete", json={
-        "total_parts": 1, "name": display_name,
+        "resolution": "1m", "total_parts": 1, "name": display_name,
     })
     assert response.status_code == 200
     image = db_session.get(Image, uuid.UUID(response.json()["data"]["image_id"]))
     assert image.name == display_name
     assert image.original_filename == filename
     assert image.mime_type == "image/tiff"
-    assert image.storage_key == f"raw/{image.id}/source.tiff"
+    assert image.storage_key == f"raw/{image.id}/{filename}"
     assert (tmp_path / "storage/sar" / image.storage_key).read_bytes() == original
     assert image.checksum_sha256 == hashlib.sha256(original).hexdigest()
 
@@ -68,7 +68,7 @@ def test_failed_storage_write_keeps_upload_for_retry(client, db_session, monkeyp
     def missing_destination(**_kwargs):
         raise FileNotFoundError("destination unavailable")
     monkeypatch.setattr("app.api.routes.images.put_file", missing_destination)
-    response = client.post(f"/api/v1/images/upload/{upload_id}/complete", json={"total_parts": 1, "name": "source.tif"})
+    response = client.post(f"/api/v1/images/upload/{upload_id}/complete", json={"resolution": "1m", "total_parts": 1, "name": "source.tif"})
     assert response.status_code == 500
     assert "无法写入数据目录" in response.json()["detail"]
     assert db_session.query(Image).count() == before

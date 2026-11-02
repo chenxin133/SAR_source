@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import Response
 from PIL import Image as PILImage, TiffImagePlugin
 from sqlalchemy import select
@@ -19,6 +19,9 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.deps import get_project
+from app.upload_filenames import storage_filename
+from app.scene_metadata import MAX_XML_BYTES, parse_scene_xml, decode_scene_xml, satellite_name
+from app.duplicate_files import import_lock, reuse_duplicate
 from app.models import Image, Project, Thumbnail
 from app.schemas.common import Envelope
 from app.schemas.images import (
@@ -41,7 +44,7 @@ from app.storage import (
     read_object_bytes,
     use_local_storage,
 )
-from app.upload_service import assemble, cleanup, get_upload_filename, init_upload, write_part
+from app.upload_service import assemble, cleanup, get_upload_filename, init_upload, write_part, require_upload_project
 from app.workers.client import enqueue_process_image
 
 
@@ -69,6 +72,28 @@ def _region_to_rgb(crop: PILImage.Image) -> PILImage.Image:
     return crop.convert("RGB")
 
 
+def _store_scene_xml(image: Image, content: bytes, filename: str | None, metadata: dict) -> None:
+    settings = get_settings()
+    key = str(Path(image.storage_key).with_suffix('.xml')).replace('\\', '/')
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / 'scene.xml'
+        path.write_bytes(content)
+        put_file(bucket=settings.s3_bucket, key=key, file_path=str(path), content_type='application/xml')
+    image.metadata_xml_key = key
+    image.metadata_xml_filename = PureWindowsPath(filename or 'scene.xml').name
+    image.scene_metadata = metadata
+
+
+@router.post('/metadata/parse-xml', response_model=Envelope[dict])
+async def parse_metadata_xml(file: UploadFile = File(...), project: Project = Depends(get_project)):
+    content = await file.read(MAX_XML_BYTES + 1)
+    try:
+        metadata = parse_scene_xml(content)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return Envelope(data=metadata)
+
+
 @router.get("", response_model=Envelope[list[ImageOut]])
 def list_images(
     request: Request,
@@ -93,7 +118,10 @@ def list_images(
             name=r.name,
             size_bytes=int(r.size_bytes or 0),
             mime_type=r.mime_type,
-            satellite=r.satellite,
+            satellite=satellite_name(r.satellite),
+            metadata_xml_url=presign_get_url(bucket=get_settings().s3_bucket, key=r.metadata_xml_key) if r.metadata_xml_key else None,
+            metadata_xml_filename=r.metadata_xml_filename,
+            scene_metadata=r.scene_metadata,
             acquisition_at=r.acquisition_at,
             resolution=r.resolution,
             frequency_band=r.frequency_band,
@@ -145,7 +173,10 @@ def get_image(
         name=image.name,
         size_bytes=int(image.size_bytes or 0),
         mime_type=image.mime_type,
-        satellite=image.satellite,
+        satellite=satellite_name(image.satellite),
+        metadata_xml_url=presign_get_url(bucket=settings.s3_bucket, key=image.metadata_xml_key) if image.metadata_xml_key else None,
+        metadata_xml_filename=image.metadata_xml_filename,
+        scene_metadata=image.scene_metadata,
         acquisition_at=image.acquisition_at,
         resolution=image.resolution,
         frequency_band=image.frequency_band,
@@ -174,6 +205,10 @@ def update_image(
     if image is None:
         raise HTTPException(status_code=404, detail="Image not found")
     changes = payload.model_dump(exclude_unset=True)
+    if 'resolution' in changes and not (changes['resolution'] or '').strip():
+        raise HTTPException(422, '分辨率为必填项')
+    if 'satellite' in changes:
+        changes['satellite'] = satellite_name(changes['satellite'])
     for field, value in changes.items():
         setattr(image, field, value)
     if changes:
@@ -200,6 +235,8 @@ def delete_image(
     for t in thumbs:
         delete_object(bucket=settings.s3_bucket, key=t.storage_key)
     delete_object(bucket=settings.s3_bucket, key=image.storage_key)
+    if image.metadata_xml_key:
+        delete_object(bucket=settings.s3_bucket, key=image.metadata_xml_key)
 
     db.delete(image)
     db.commit()
@@ -212,7 +249,7 @@ def upload_init(
     request: Request,
     project: Project = Depends(get_project),
 ):
-    info = init_upload(filename=payload.filename, total_size=payload.total_size)
+    info = init_upload(filename=payload.filename, total_size=payload.total_size, project_id=project.id)
     return Envelope(
         data=UploadInitResponse(upload_id=info["upload_id"], part_size=int(info["part_size"])),
         request_id=getattr(request.state, "request_id", None),
@@ -226,6 +263,7 @@ async def upload_part(
     request: Request,
     project: Project = Depends(get_project),
 ):
+    require_upload_project(upload_id, project.id)
     if part_no <= 0:
         raise HTTPException(status_code=400, detail="Invalid part number")
     settings = get_settings()
@@ -244,69 +282,118 @@ def upload_complete(
     db: Session = Depends(get_db),
     project: Project = Depends(get_project),
 ):
-    settings = get_settings()
-    if payload.total_parts <= 0:
-        raise HTTPException(status_code=400, detail="Invalid total_parts")
+    require_upload_project(upload_id, project.id)
+    with import_lock:
+        settings = get_settings()
+        if payload.total_parts <= 0:
+            raise HTTPException(status_code=400, detail="Invalid total_parts")
 
-    assemble_started = time.perf_counter()
-    try:
-        assembled_path, sha256, size_bytes = assemble(upload_id=upload_id, total_parts=payload.total_parts)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        assemble_started = time.perf_counter()
+        try:
+            assembled_path, sha256, size_bytes = assemble(upload_id=upload_id, total_parts=payload.total_parts)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
-    assembled_at = time.perf_counter()
-    original_filename = PureWindowsPath(get_upload_filename(upload_id) or payload.name or "source.bin").name
-    name = payload.name or original_filename
-    image_id = uuid.uuid4()
-    suffix = Path(original_filename).suffix.lower()
-    if not suffix or len(suffix) > 10 or not suffix[1:].isalnum():
-        suffix = ".bin"
-    # Display names can contain Windows path characters or be very long.
-    # Keep the original filename as metadata and use a short storage leaf.
-    storage_key = f"raw/{image_id}/source{suffix}"
-    mime_type = payload.mime_type or mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
-    try:
-        put_file(
-            bucket=settings.s3_bucket, key=storage_key, file_path=assembled_path,
-            content_type=mime_type, consume_source=True,
+        existing = db.scalar(select(Image).where(
+            Image.project_id == project.id, Image.checksum_sha256 == sha256,
+        ).order_by(Image.created_at, Image.id))
+        try:
+            xml_content, xml_metadata = decode_scene_xml(payload.metadata_xml_base64)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        fields = ('name', 'satellite', 'acquisition_at', 'resolution', 'frequency_band', 'polarization', 'description')
+        values = {}
+        for field in fields:
+            if field in payload.model_fields_set:
+                values[field] = getattr(payload, field)
+            elif xml_metadata and xml_metadata.get(field):
+                values[field] = xml_metadata[field]
+        if isinstance(values.get('acquisition_at'), str):
+            values['acquisition_at'] = datetime.fromisoformat(values['acquisition_at'].replace('Z', '+00:00'))
+        if 'satellite' in values:
+            values['satellite'] = satellite_name(values['satellite'])
+        if reuse_duplicate(existing, payload.duplicate_action):
+            if payload.duplicate_action == 'update':
+                if 'resolution' in values and not (values['resolution'] or '').strip():
+                    raise HTTPException(422, '分辨率为必填项')
+                for field, value in values.items():
+                    if field == 'name' and not value:
+                        continue
+                    setattr(existing, field, value)
+                if xml_content is not None:
+                    _store_scene_xml(existing, xml_content, payload.metadata_xml_filename, xml_metadata)
+                existing.updated_at = datetime.now(timezone.utc)
+                db.commit()
+            cleanup(upload_id)
+            return Envelope(data=UploadCompleteResponse(image_id=existing.id, reused=True, updated=payload.duplicate_action == 'update'),
+                            request_id=getattr(request.state, "request_id", None))
+        if not str(values.get('resolution') or '').strip():
+            raise HTTPException(422, '分辨率为必填项；请从 XML 读取或手动填写')
+        assembled_at = time.perf_counter()
+        original_filename = PureWindowsPath(get_upload_filename(upload_id) or payload.name or "source.bin").name
+        name = values.pop("name", None) or original_filename
+        image_id = uuid.uuid4()
+        storage_key = f"raw/{image_id}/{storage_filename(original_filename)}"
+        mime_type = payload.mime_type or mimetypes.guess_type(original_filename)[0] or "application/octet-stream"
+        try:
+            put_file(
+                bucket=settings.s3_bucket, key=storage_key, file_path=assembled_path,
+                content_type=mime_type, consume_source=True,
+            )
+        except OSError as exc:
+            logger.exception("Cannot store upload %s: key=%s storage_dir=%s", upload_id, storage_key, settings.local_storage_dir)
+            raise HTTPException(
+                status_code=500,
+                detail="上传文件无法写入数据目录，请检查目录是否存在、路径长度、磁盘空间和写入权限后重试。上传分片已保留。",
+            ) from exc
+
+        stored_at = time.perf_counter()
+        image = Image(
+            id=image_id,
+            project_id=project.id,
+            created_at=datetime.now(timezone.utc),
+            name=name,
+            original_filename=original_filename,
+            mime_type=mime_type,
+            satellite=values.get("satellite"),
+            acquisition_at=values.get("acquisition_at"),
+            resolution=values.get("resolution"),
+            frequency_band=values.get("frequency_band"),
+            polarization=values.get("polarization"),
+            description=values.get("description"),
+            size_bytes=size_bytes,
+            checksum_sha256=sha256,
+            storage_key=storage_key,
+            status="uploaded",
         )
-    except OSError as exc:
-        logger.exception("Cannot store upload %s: key=%s storage_dir=%s", upload_id, storage_key, settings.local_storage_dir)
-        raise HTTPException(
-            status_code=500,
-            detail="上传文件无法写入数据目录，请检查目录是否存在、路径长度、磁盘空间和写入权限后重试。上传分片已保留。",
-        ) from exc
+        try:
+            if xml_content is not None:
+                _store_scene_xml(image, xml_content, payload.metadata_xml_filename, xml_metadata)
+            db.add(image)
+            db.commit()
+        except Exception:
+            db.rollback()
+            delete_object(bucket=settings.s3_bucket, key=storage_key)
+            if image.metadata_xml_key:
+                delete_object(bucket=settings.s3_bucket, key=image.metadata_xml_key)
+            raise
 
-    stored_at = time.perf_counter()
-    image = Image(
-        id=image_id,
-        project_id=project.id,
-        name=name,
-        original_filename=original_filename,
-        mime_type=mime_type,
-        satellite=payload.satellite,
-        acquisition_at=payload.acquisition_at,
-        resolution=payload.resolution,
-        frequency_band=payload.frequency_band,
-        polarization=payload.polarization,
-        description=payload.description,
-        size_bytes=size_bytes,
-        checksum_sha256=sha256,
-        storage_key=storage_key,
-        status="uploaded",
-    )
-    db.add(image)
-    db.commit()
+        cleanup(upload_id)
+        logger.info(
+            "upload_timing upload_id=%s bytes=%s assemble_seconds=%.3f store_seconds=%.3f",
+            upload_id, size_bytes, assembled_at - assemble_started, stored_at - assembled_at,
+        )
+        return Envelope(
+            data=UploadCompleteResponse(image_id=image_id),
+            request_id=getattr(request.state, "request_id", None),
+        )
 
+
+@router.delete("/upload/{upload_id}", response_model=Envelope[dict])
+def cancel_upload(upload_id: uuid.UUID, project: Project = Depends(get_project)):
+    require_upload_project(upload_id, project.id)
     cleanup(upload_id)
-    logger.info(
-        "upload_timing upload_id=%s bytes=%s assemble_seconds=%.3f store_seconds=%.3f",
-        upload_id, size_bytes, assembled_at - assemble_started, stored_at - assembled_at,
-    )
-    return Envelope(
-        data=UploadCompleteResponse(image_id=image_id),
-        request_id=getattr(request.state, "request_id", None),
-    )
+    return Envelope(data={"canceled": True})
 
 
 @router.post("/{image_id}/process", response_model=Envelope[dict])

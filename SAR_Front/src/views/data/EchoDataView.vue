@@ -129,6 +129,7 @@
 </template>
 
 <script setup lang="ts">
+import { ImportCancelledError } from '../../utils/duplicateImport'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { echoesApi, type EchoPulse, type EchoSignal } from '../../services/echoesApi'
@@ -183,9 +184,9 @@ const importData = async () => {
   if (file.value.size > 64 * 1048576) return void ElMessage.warning('文件不能超过 64 MiB')
   busy.value = true
   try {
-    await echoesApi.upload(file.value, importForm); importVisible.value = false
-    ElMessage.success('回波文件已校验并入库'); search()
-  } catch (error) { ElMessage.error(errorText(error)) }
+    const imported = await echoesApi.upload(file.value, importForm); importVisible.value = false
+    ElMessage.success('回波已导入或使用已有记录'); search(); view(imported)
+  } catch (error) { if (!(error instanceof ImportCancelledError)) ElMessage.error(errorText(error)) }
   finally { busy.value = false }
 }
 const generate = async () => {

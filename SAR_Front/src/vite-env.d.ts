@@ -21,6 +21,10 @@ interface ImportMeta {
 }
 
 interface SarDesktopBridge {
+  findCompanionXml?(file: File): Promise<
+    { status: 'found'; filename: string; base64: string; match: 'same-name' | 'copy-name' | 'only-xml' } |
+    { status: 'not-found' } | { status: 'unavailable' } | { status: 'ambiguous'; filenames: string[] }
+  >
   getRuntimeInfo(): Promise<unknown>
   pingBackend(): Promise<{ ok: boolean }>
   openExternal(url: string): Promise<{ ok: true }>

@@ -17,6 +17,19 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input, textarea, [contenteditable="true"], pre, code, .selectable-text,
+.el-table__body .cell, .el-descriptions__content, .preview-meta, .error-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+button, .el-button, .el-checkbox, .el-radio-button {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #app {

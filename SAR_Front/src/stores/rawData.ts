@@ -1,3 +1,4 @@
+import { ImportCancelledError } from '../utils/duplicateImport'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ImageMetadataPatch, SarImage, UploadPayload } from '../types/sar'
@@ -35,8 +36,8 @@ export const useRawDataStore = defineStore('rawData', () => {
         (stage) => { uploadStage.value = stage }
       )
 
-      images.value.unshift(newImage)
-      ElMessage.success('上传成功')
+      images.value = [newImage, ...images.value.filter((image) => image.id !== newImage.id)]
+      ElMessage.success('影像已导入或使用已有记录')
       if (getStorageMode() === 'local' && payload.file.size > 200 * 1024 * 1024) {
         ElMessage.warning(
           newImage.previewNotice ||
@@ -45,6 +46,7 @@ export const useRawDataStore = defineStore('rawData', () => {
       }
       return true
     } catch (error) {
+      if (error instanceof ImportCancelledError) return false
       const message = error instanceof Error && error.message ? error.message : '上传失败'
       ElMessage.error(message)
       console.error(error)

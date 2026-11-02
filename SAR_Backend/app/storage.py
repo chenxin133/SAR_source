@@ -6,6 +6,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
@@ -137,7 +138,7 @@ def put_file(
 
 def presign_get_url(*, bucket: str, key: str, expires_seconds: int = 900) -> str:
     if use_local_storage():
-        return f"/api/v1/storage/{bucket}/{key.lstrip('/')}"
+        return f"/api/v1/storage/{quote(bucket, safe='')}/{quote(key.lstrip('/'), safe='/')}"
     s3 = get_s3_presign_client()
     return s3.generate_presigned_url(
         "get_object",

@@ -20,6 +20,12 @@
     <el-descriptions-item v-if="image.originalPersistent === false" label="预览提示">
       <el-alert :title="image.previewNotice || '原图超过 200MB，仅当前会话可用；系统将优先展示持久化预览图。'" type="warning" :closable="false" show-icon />
     </el-descriptions-item>
+    <el-descriptions-item v-if="image.metadataXmlUrl" label="配套 XML">
+      <a :href="image.metadataXmlUrl" target="_blank" rel="noopener">{{ image.metadataXmlFilename || '查看 XML' }}</a>
+    </el-descriptions-item>
+    <el-descriptions-item v-if="image.sceneMetadata?.data_source" label="XML 数据源">{{ image.sceneMetadata.data_source }}</el-descriptions-item>
+    <el-descriptions-item v-if="image.sceneMetadata?.imaging_end" label="成像结束 / 基准">{{ image.sceneMetadata.imaging_end }} / {{ image.sceneMetadata.time_reference }}</el-descriptions-item>
+    <el-descriptions-item v-if="image.sceneMetadata?.coordinates?.center" label="中心坐标">{{ image.sceneMetadata.coordinates.center.longitude }}, {{ image.sceneMetadata.coordinates.center.latitude }}</el-descriptions-item>
   </el-descriptions>
 </template>
 
@@ -88,6 +94,7 @@ const save = async () => {
       // timestamp to UTC here would silently move the acquisition time by hours.
       patch = { acquisitionDate: value }
     } else {
+      if (key === 'resolution' && !value) throw new Error('分辨率为必填项')
       if (key === 'name' && !value) throw new Error('名称不能为空')
       patch = { [key]: value }
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import io
 import uuid
 from pathlib import Path
 
@@ -11,6 +12,18 @@ from PIL import Image as PILImage, TiffImagePlugin
 
 from app.config import get_settings
 from app.models import Annotation, Image, Project, Sample, Thumbnail
+
+
+@pytest.fixture(autouse=True)
+def mock_sidecar_storage_with_image_adapter(monkeypatch):
+    from app.api.routes import samples
+    monkeypatch.setattr('app.sample_metadata.put_file', lambda **kwargs: samples.put_file(**kwargs))
+
+
+def _png_bytes():
+    output = io.BytesIO()
+    PILImage.new('RGB', (10, 8)).save(output, format='PNG')
+    return output.getvalue()
 
 
 def _create_image(db_session) -> uuid.UUID:
@@ -100,15 +113,15 @@ def test_upload_and_delete_shared_sample(client, db_session, monkeypatch):
             "height": "8",
         },
         files={
-            "image": ("image.png", b"PNG", "image/png"),
-            "thumbnail": ("thumbnail.png", b"THUMB", "image/png"),
+            "image": ("image.png", _png_bytes(), "image/png"),
+            "thumbnail": ("thumbnail.png", _png_bytes(), "image/png"),
         },
     )
     assert response.status_code == 200
     sample = response.json()["data"]
     assert sample["roi"]["annotationId"] == "ANN_1"
     assert sample["roi"]["annotationType"] == "polygon"
-    assert len(stored) == 2
+    assert len(stored) == 3
 
     removed = client.delete(f"/api/v1/samples/{sample['id']}")
     assert removed.status_code == 200
@@ -175,8 +188,8 @@ def test_crop_sample_from_source_preserves_tiff_format(client, db_session, monke
     thumbnail_path = tmp_path / "thumbnail.png"
     thumbnail_path.write_bytes(stored[thumbnail_key])
     with PILImage.open(thumbnail_path) as thumbnail:
-        assert thumbnail.mode == "RGB"
-        assert thumbnail.getextrema() != ((0, 0), (0, 0), (0, 0))
+        assert thumbnail.mode == "RGBA"
+        assert thumbnail.convert('RGB').getextrema() != ((0, 0), (0, 0), (0, 0))
 
 
 def test_float_tiff_sample_exports_visible_png_jpeg_and_tiff(client, db_session, monkeypatch, tmp_path):
@@ -385,7 +398,7 @@ def test_crop_png_source_to_tiff_uses_png_reader(client, db_session, monkeypatch
     with PILImage.open(output) as crop:
         assert crop.format == "TIFF"
         assert crop.size == (60, 50)
-        assert crop.getpixel((20, 20)) == (40, 80, 120)
+        assert crop.convert('RGB').getpixel((20, 20)) == (40, 80, 120)
 
 
 def test_uploaded_tiff_sample_keeps_original_bytes_and_exports_source(client, db_session, monkeypatch):

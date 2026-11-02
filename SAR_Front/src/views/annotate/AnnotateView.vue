@@ -3,7 +3,7 @@
     <div class="header">
       <div class="title">
         <h2>图像标注</h2>
-        <div class="hint">点击加点，双击/Enter 完成多边形，Esc 取消绘制，Delete 删除选中，Ctrl+Z 撤销，Ctrl+Y 重做，按住空格拖动画布，选中矩形后可拖动旋转手柄旋转标注框</div>
+        <div class="hint">按住 Shift 绘制正方形；点击尺寸直接修改，Enter 或移开焦点确认，Esc 取消修改；点击加点，双击/Enter 完成多边形，Delete 删除选中，Ctrl+Z 撤销，Ctrl+Y 重做，按住中键或空格拖动画布，选中矩形后可拖动旋转手柄旋转标注框</div>
       </div>
 
       <div class="toolbar">
@@ -13,6 +13,7 @@
           placeholder="选择影像"
           style="width: 320px"
           :loading="imagesLoading"
+          :disabled="metaDialogVisible"
           @change="handleImageChange"
         >
           <el-option
@@ -38,14 +39,14 @@
         <el-button style="margin-left: 12px" @click="fitToScreen">适配</el-button>
       <el-switch v-model="snapEnabled" active-text="吸附" style="margin-left: 12px" />
       <el-slider v-model="snapPx" :min="2" :max="30" :step="1" style="width: 140px" :disabled="!snapEnabled" />
-        <el-select v-model="rotationDeg" style="width: 120px; margin-left: 12px" :disabled="!currentImageId">
+        <el-select v-model="rotationDeg" style="width: 120px; margin-left: 12px" :disabled="!currentImageId || metaDialogVisible">
           <el-option :value="0" label="旋转 0°" />
           <el-option :value="90" label="旋转 90°" />
           <el-option :value="180" label="旋转 180°" />
           <el-option :value="270" label="旋转 270°" />
         </el-select>
-        <el-slider v-model="rotationDeg" :min="0" :max="360" :step="1" style="width: 180px" :disabled="!currentImageId" />
-        <el-button type="success" style="margin-left: 12px" :disabled="!currentImageId" @click="saveToLocal">保存</el-button>
+        <el-slider v-model="rotationDeg" :min="0" :max="360" :step="1" style="width: 180px" :disabled="!currentImageId || metaDialogVisible" />
+        <el-button type="success" style="margin-left: 12px" :disabled="!currentImageId || metaDialogVisible" @click="saveToLocal">保存</el-button>
         <el-checkbox v-model="autoGenerateSamplesOnSave">保存时自动生成样本</el-checkbox>
         <el-button :disabled="!currentImageId" @click="exportJson">导出 JSON</el-button>
         <el-button :disabled="!currentImageId" @click="triggerImport">导入 JSON</el-button>
@@ -55,12 +56,42 @@
     </div>
 
     <div class="workspace">
-      <div ref="canvasWrapRef" class="canvas-wrap" @contextmenu.prevent>
+      <div ref="canvasWrapRef" class="canvas-wrap" @contextmenu.prevent @mousedown.middle.prevent @auxclick.middle.prevent>
         <canvas ref="canvasElRef" class="canvas"></canvas>
         <div v-if="canvasLoading" class="loading-mask" v-loading="canvasLoading"></div>
+        <div v-if="sizeOverlay" class="annotation-size" :style="{ left: sizeOverlay.left + 'px', top: sizeOverlay.top + 'px' }" @pointerdown.stop @wheel.stop @keydown.esc.stop.prevent="sizeEditing = false">
+          <button v-if="!sizeEditing" type="button" class="size-label" data-testid="annotation-size" :disabled="isDrawingSize" @click="startSizeEdit">
+            {{ Math.round(sizeOverlay.width) }} × {{ Math.round(sizeOverlay.height) }} px
+          </button>
+          <div v-else class="size-label size-inline" @focusout="onSizeFocusOut" @keydown.enter.stop.prevent="applySizeEdit">
+            <input ref="sizeWidthInput" v-model.number="sizeDraft.width" type="number" min="1" step="1" aria-label="标注宽度" @focus="selectSizeInput" />
+            <span>×</span>
+            <input v-model.number="sizeDraft.height" type="number" min="1" step="1" aria-label="标注高度" @focus="selectSizeInput" />
+            <span>px</span>
+          </div>
+        </div>
+
       </div>
 
       <div class="sidebar">
+        <div v-if="metaDialogVisible" class="panel annotation-draft" @keydown.esc.stop.prevent="cancelMeta">
+          <div class="draft-title">完成标注</div>
+          <div class="draft-hint">可先拖动边框或点击尺寸调整，再填写类别。</div>
+          <el-form label-width="48px" size="small">
+            <el-form-item label="类别" required>
+              <el-select ref="categoryInput" v-model="metaDraft.category" filterable allow-create default-first-option placeholder="选择或输入类别"
+                @input.capture="onCategoryQueryInput" @change="categoryQuery = ''">
+                <el-option v-for="category in categoryOptions" :key="category" :value="category" :label="category" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="备注"><el-input v-model="metaDraft.remark" type="textarea" :rows="2" /></el-form-item>
+          </el-form>
+          <div class="draft-actions">
+            <el-button size="small" @click="cancelMeta">取消</el-button>
+            <el-button size="small" type="primary" @click="confirmMeta">保存标注</el-button>
+          </div>
+        </div>
+
         <div class="panel panel-list">
           <div class="panel-title">标注列表</div>
           <el-table
@@ -86,7 +117,7 @@
           </el-table>
         </div>
 
-        <div class="panel panel-props" style="margin-top: 12px">
+        <div v-if="!metaDialogVisible" class="panel panel-props" style="margin-top: 12px">
           <div class="panel-title">属性</div>
           <div v-if="selectedAnnotation" class="form">
             <el-form label-width="64px" size="default">
@@ -117,26 +148,12 @@
       </div>
     </div>
 
-    <el-dialog v-model="metaDialogVisible" title="标注信息" width="420px" destroy-on-close>
-      <el-form label-width="64px">
-        <el-form-item label="类别">
-          <el-input v-model="metaDraft.category" placeholder="输入类别" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="metaDraft.remark" type="textarea" :rows="3" placeholder="输入备注" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="cancelMeta">取消</el-button>
-        <el-button type="primary" @click="confirmMeta">确定</el-button>
-      </template>
-    </el-dialog>
-
     <input ref="importInputRef" type="file" accept="application/json" style="display: none" @change="handleImportFile" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { constrainSquareEnd, placeDimensionLabel } from '../../utils/annotationGeometry'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Canvas, FabricImage, Point, Polygon, Polyline, Rect, util } from 'fabric'
@@ -184,6 +201,18 @@ const autoGenerateSamplesOnSave = ref(false)
 
 const metaDialogVisible = ref(false)
 const metaDraft = ref<{ category: string; remark: string }>({ category: '', remark: '' })
+const lastCategory = ref('')
+const categoryQuery = ref('')
+const onCategoryQueryInput = (event: Event) => {
+  if (event.target instanceof HTMLInputElement) categoryQuery.value = event.target.value
+}
+const categoryInput = ref<{ focus?: () => void }>()
+const categoryOptions = computed(() => [...new Set([lastCategory.value, ...annotations.value.map((item) => item.category)].filter(Boolean))])
+const sizeOverlay = ref<{ width: number; height: number; left: number; top: number } | null>(null)
+const sizeEditing = ref(false)
+const isDrawingSize = ref(false)
+const sizeDraft = ref({ width: 1, height: 1 })
+const sizeWidthInput = ref<HTMLInputElement | null>(null)
 let pendingObject: Rect | Polygon | null = null
 let pendingType: 'rect' | 'polygon' | null = null
 
@@ -458,7 +487,10 @@ const imagePointToScenePoint = (p: XY, deg = rotationDeg.value) => {
 
 const scenePointToImagePoint = (p: XY, deg = rotationDeg.value) => {
   const { w, h } = getImageSize()
-  return rotatePointAround(p, -deg, { x: w / 2, y: h / 2 })
+  const point = rotatePointAround(p, -deg, { x: w / 2, y: h / 2 })
+  // Remove transform roundoff at exact pixel boundaries before cropping.
+  const clean = (value: number) => Math.abs(value - Math.round(value)) < 1e-8 ? Math.round(value) : value
+  return { x: clean(point.x), y: clean(point.y) }
 }
 
 const imagePointsToScenePoints = (pts: XY[], deg = rotationDeg.value) => pts.map((p) => imagePointToScenePoint(p, deg))
@@ -571,6 +603,7 @@ const refreshDetailRegion = async () => {
 }
 
 const setTool = (t: 'select' | 'rect' | 'polygon') => {
+  if (metaDialogVisible.value && t !== 'select') { ElMessage.warning('请先保存或取消当前标注'); return }
   tool.value = t
   if (!canvas) return
   canvas.selection = t === 'select'
@@ -637,7 +670,9 @@ const initCanvas = async () => {
   canvas = new Canvas(canvasElRef.value, {
     selection: true,
     preserveObjectStacking: true,
-    skipOffscreen: false
+    skipOffscreen: false,
+    fireMiddleClick: true,
+    fireRightClick: true
   })
 
   const resize = () => {
@@ -966,8 +1001,12 @@ const setRectAbsPoints = (rect: Rect, pts: XY[]) => {
 }
 
 const extractRectAbsPoints = (rect: Rect): XY[] => {
-  const coords = rect.getCoords()
-  return coords.map((p) => ({ x: p.x, y: p.y }))
+  const matrix = rect.calcTransformMatrix()
+  const halfW = Number(rect.width || 0) / 2, halfH = Number(rect.height || 0) / 2
+  return [[-halfW, -halfH], [halfW, -halfH], [halfW, halfH], [-halfW, halfH]].map(([x, y]) => {
+    const point = util.transformPoint(new Point(x, y), matrix)
+    return { x: point.x, y: point.y }
+  })
 }
 
 const newSampleId = () => `SMP_${Date.now()}_${Math.random().toString(16).slice(2)}`
@@ -1125,6 +1164,10 @@ const buildSampleFromAnnotation = async (
     name,
     imageId: currentImageId.value,
     imageName: currentImage.value?.name,
+    resolution: currentImage.value?.resolution,
+    frequencyBand: currentImage.value?.frequencyBand,
+    sceneMetadata: currentImage.value?.sceneMetadata,
+    sequenceNo: existing?.sequenceNo,
     annotationId: ann.id,
     annotationType: ann.type,
     category: ann.category,
@@ -1142,51 +1185,18 @@ const buildSampleFromAnnotation = async (
 const cropSelectedToSample = async () => {
   const ann = selectedAnnotation.value
   if (!ann || !bgObject || !currentImageId.value) return
+  if (!ann.category.trim()) { ElMessage.warning('请先填写标注类别'); return }
   const src = getBgElement()
-  if (!src) {
-    ElMessage.error('当前影像未就绪')
-    return
-  }
-
-  const region = getAnnotationCropRegion(ann)
-  if (!region) {
-    ElMessage.error('裁切区域过小')
-    return
-  }
-
-  const defaultName = `${currentImage.value?.name || currentImageId.value}_${ann.category || ann.type}_${ann.id}`
-  const name = await ElMessageBox.prompt('样本名称', '裁切并保存为样本', {
-    confirmButtonText: '保存',
-    cancelButtonText: '取消',
-    inputValue: defaultName,
-    inputPlaceholder: '输入样本名称'
-  })
-    .then((r) => r.value)
-    .catch(() => '')
-  if (!name) return
-
-  const sample = await buildSampleFromAnnotation(ann, src, name)
-  if (!sample) {
-    ElMessage.error('生成样本失败')
-    return
-  }
+  if (!src) { ElMessage.error('当前影像未就绪'); return }
   try {
-    const savedSample = getStorageMode() === 'backend' ? sample : await samplesRepo.put(sample)
-    sample.id = savedSample.id
-  } catch (e: any) {
-    ElMessage.error(e?.message ? `保存样本失败：${e.message}` : '保存样本失败')
-    return
+    const existing = (await samplesRepo.list()).find((sample) => sample.imageId === currentImageId.value && sample.annotationId === ann.id)
+    const sample = await buildSampleFromAnnotation(ann, src, '', existing)
+    if (!sample) throw new Error('裁切区域过小或影像未就绪')
+    const saved = getStorageMode() === 'backend' ? sample : await samplesRepo.put(sample)
+    ElMessage.success(`已保存样本：${saved.name}，并生成配套 XML`)
+  } catch (error: any) {
+    ElMessage.error(error?.message || '保存样本失败')
   }
-  ElMessage.success('已裁切并保存为样本')
-  ElMessageBox.confirm('是否前往样本管理查看？', '已保存', {
-    confirmButtonText: '去查看',
-    cancelButtonText: '留在此页',
-    type: 'success'
-  })
-    .then(() => {
-      router.push({ name: 'sample-data', query: { highlight: sample.id } })
-    })
-    .catch(() => undefined)
 }
 
 const autoGenerateSamplesForCurrentImage = async () => {
@@ -1213,8 +1223,14 @@ const autoGenerateSamplesForCurrentImage = async () => {
 const openMeta = (obj: Rect | Polygon, type: 'rect' | 'polygon') => {
   pendingObject = obj
   pendingType = type
-  metaDraft.value = { category: '', remark: '' }
+  metaDraft.value = { category: lastCategory.value, remark: '' }
+  categoryQuery.value = ''
+  selectedAnnotationId.value = null
   metaDialogVisible.value = true
+  setTool('select')
+  canvas?.setActiveObject(obj)
+  updateSizeOverlay()
+  void nextTick(() => categoryInput.value?.focus?.())
 }
 
 const cancelMeta = () => {
@@ -1225,11 +1241,18 @@ const cancelMeta = () => {
   }
   pendingObject = null
   pendingType = null
+  sizeEditing.value = false
+  sizeOverlay.value = null
   setTool('select')
 }
 
 const confirmMeta = async () => {
   if (!pendingObject || !pendingType || !canvas) return
+  if (sizeEditing.value && !applySizeEdit()) return
+  const category = (categoryQuery.value || metaDraft.value.category).trim()
+  if (!category) { ElMessage.warning('请填写类别'); categoryInput.value?.focus?.(); return }
+  metaDraft.value.category = category
+  lastCategory.value = metaDraft.value.category
   const now = Date.now()
   const id = newId()
 
@@ -1273,6 +1296,7 @@ const confirmMeta = async () => {
 
   ;(pendingObject as any).annotationId = id
   metaDialogVisible.value = false
+  sizeEditing.value = false
   pendingObject = null
   pendingType = null
   applyAnnotations([...annotations.value, ann], true)
@@ -1304,6 +1328,8 @@ let isSpaceDown = false
 let isDrawingRect = false
 let rectStartScene = { x: 0, y: 0 }
 let rectEndScene = { x: 0, y: 0 }
+let rectRawEndScene = { x: 0, y: 0 }
+let isShiftDown = false
 let drawingRect: Rect | null = null
 
 let polyPoints: XY[] = []
@@ -1395,6 +1421,7 @@ const cancelDrawing = () => {
     canvas.remove(drawingRect)
     drawingRect = null
     isDrawingRect = false
+    isDrawingSize.value = false
     canvas.requestRenderAll()
   }
   if (drawingLine) {
@@ -1439,6 +1466,7 @@ const isTypingTarget = (e: KeyboardEvent) => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Shift') { isShiftDown = true; if (isDrawingRect) updateDrawingRectangle(true) }
   if (e.code === 'Space') isSpaceDown = true
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -1463,6 +1491,9 @@ const onKeydown = (e: KeyboardEvent) => {
     return
   }
   const k = e.key.toLowerCase()
+  if (metaDialogVisible.value && (e.ctrlKey || e.metaKey) && ['z', 'y'].includes(k)) {
+    e.preventDefault(); ElMessage.warning('请先保存或取消当前标注'); return
+  }
   if ((e.ctrlKey || e.metaKey) && k === 'z') {
     e.preventDefault()
     undo()
@@ -1475,7 +1506,19 @@ const onKeydown = (e: KeyboardEvent) => {
 }
 
 const onKeyup = (e: KeyboardEvent) => {
+  if (e.key === 'Shift') { isShiftDown = false; if (isDrawingRect) updateDrawingRectangle(false) }
   if (e.code === 'Space') isSpaceDown = false
+}
+
+const onWindowBlur = () => {
+  isShiftDown = false
+  isSpaceDown = false
+  endPanning()
+}
+
+const endPanning = () => {
+  isPanning = false
+  if (canvas) canvas.defaultCursor = tool.value === 'select' ? 'default' : 'crosshair'
 }
 
 const syncObjectToModel = (obj: Rect | Polygon) => {
@@ -1514,8 +1557,93 @@ const syncObjectToModel = (obj: Rect | Polygon) => {
   }
 }
 
+const activeSizeObject = (): Rect | null => {
+  const object = drawingRect || pendingObject || (selectedAnnotationId.value ? objectById.get(selectedAnnotationId.value) : null)
+  return object?.type === 'rect' ? object as Rect : null
+}
+const updateSizeOverlay = () => {
+  const object = activeSizeObject()
+  if (!object || !canvas) { sizeOverlay.value = null; return }
+  const points = extractRectAbsPoints(object)
+  const metrics = getRectMetricsFromAbsPoints(points)
+  const screen = points.map((point) => util.transformPoint(new Point(point.x, point.y), canvas!.viewportTransform))
+  const center = util.transformPoint(object.getCenterPoint(), canvas.viewportTransform)
+  const mid = { x: (screen[0].x + screen[1].x) / 2, y: (screen[0].y + screen[1].y) / 2 }
+  const length = Math.hypot(mid.x - center.x, mid.y - center.y) || 1
+  const handle = object.oCoords?.mtr || { x: mid.x + 40 * (mid.x - center.x) / length, y: mid.y + 40 * (mid.y - center.y) / length }
+  const { left, top } = placeDimensionLabel({ left: Math.min(...screen.map(p => p.x)), top: Math.min(...screen.map(p => p.y)),
+    right: Math.max(...screen.map(p => p.x)), bottom: Math.max(...screen.map(p => p.y)) },
+    { width: canvas.getWidth(), height: canvas.getHeight() }, handle, 34, 180)
+  sizeOverlay.value = { width: metrics.width, height: metrics.height, left, top }
+}
+const startSizeEdit = () => {
+  if (!sizeOverlay.value || isDrawingSize.value) return
+  sizeDraft.value = { width: Math.max(1, Math.round(sizeOverlay.value.width)), height: Math.max(1, Math.round(sizeOverlay.value.height)) }
+  sizeEditing.value = true
+  void nextTick(() => { sizeWidthInput.value?.focus(); sizeWidthInput.value?.select() })
+}
+const selectSizeInput = (event: FocusEvent) => (event.target as HTMLInputElement).select()
+const onSizeFocusOut = (event: FocusEvent) => {
+  if (!sizeEditing.value || (event.relatedTarget instanceof Node && (event.currentTarget as HTMLElement).contains(event.relatedTarget))) return
+  applySizeEdit()
+}
+const applySizeEdit = () => {
+  const object = activeSizeObject()
+  if (!object || !canvas) return false
+  const width = Number(sizeDraft.value.width), height = Number(sizeDraft.value.height)
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
+    ElMessage.warning('宽高请输入正整数像素'); return false
+  }
+  const center = object.getCenterPoint()
+  const old = { left: object.left, top: object.top, width: object.width, height: object.height, scaleX: object.scaleX, scaleY: object.scaleY }
+  object.set({ left: center.x, top: center.y, originX: 'center', originY: 'center', width, height, scaleX: 1, scaleY: 1 })
+  object.setCoords()
+  let points = extractRectAbsPoints(object).map((point) => scenePointToImagePoint(point))
+  const axisAligned = points.every((point, index) => {
+    const next = points[(index + 1) % points.length]
+    return Math.abs(point.x - next.x) < 1e-8 || Math.abs(point.y - next.y) < 1e-8
+  })
+  if (axisAligned) {
+    const minX = Math.min(...points.map(point => point.x)), minY = Math.min(...points.map(point => point.y))
+    const imageCenter = scenePointToImagePoint(center)
+    const aligned = imagePointToScenePoint({ x: imageCenter.x + Math.round(minX) - minX, y: imageCenter.y + Math.round(minY) - minY })
+    object.set({ left: aligned.x, top: aligned.y }); object.setCoords()
+    points = extractRectAbsPoints(object).map((point) => scenePointToImagePoint(point))
+  }
+  const bounds = getImageSize()
+  if (points.some((point) => point.x < -0.01 || point.y < -0.01 || point.x > bounds.w + 0.01 || point.y > bounds.h + 0.01)) {
+    object.set(old); object.setCoords(); ElMessage.warning('尺寸超出原图范围，请缩小尺寸或先移动边框'); return false
+  }
+  if (object !== pendingObject) syncObjectToModel(object)
+  sizeEditing.value = false
+  updateSizeOverlay(); canvas.requestRenderAll()
+  return true
+}
+const updateDrawingRectangle = (square: boolean) => {
+  if (!drawingRect || !canvas) return
+  rectEndScene = constrainSquareEnd(rectStartScene, rectRawEndScene, square)
+  const x0 = Math.min(rectStartScene.x, rectEndScene.x), y0 = Math.min(rectStartScene.y, rectEndScene.y)
+  const x1 = Math.max(rectStartScene.x, rectEndScene.x), y1 = Math.max(rectStartScene.y, rectEndScene.y)
+  setRectAbsPoints(drawingRect, [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }])
+  updateSizeOverlay(); canvas.requestRenderAll()
+}
+watch(selectedAnnotationId, () => { sizeEditing.value = false; void nextTick(updateSizeOverlay) })
+watch(sizeEditing, () => { void nextTick(updateSizeOverlay) })
+
 const bindCanvasEvents = () => {
   if (!canvas) return
+
+  canvas.on('after:render', updateSizeOverlay)
+  for (const event of ['object:moving', 'object:scaling', 'object:rotating'] as const) {
+    canvas.on(event, (opt) => {
+      const object = opt.target as Rect
+      if (event === 'object:scaling' && object?.type === 'rect' && ((opt.e as MouseEvent | undefined)?.shiftKey || isShiftDown)) {
+        const side = Math.max(Math.abs(object.width * object.scaleX), Math.abs(object.height * object.scaleY))
+        object.set({ scaleX: side / object.width, scaleY: side / object.height }); object.setCoords()
+      }
+      updateSizeOverlay()
+    })
+  }
 
   canvas.on('mouse:wheel', (opt) => {
     const e = opt.e as WheelEvent
@@ -1538,18 +1666,22 @@ const bindCanvasEvents = () => {
   canvas.on('mouse:down', (opt) => {
     if (!canvas) return
     const e = opt.e as MouseEvent
-    if (e.button === 2 || isSpaceDown) {
+    if (e.button === 1 || e.button === 2 || isSpaceDown) {
+      e.preventDefault()
       isPanning = true
       panLast = { x: e.clientX, y: e.clientY }
-      canvas.defaultCursor = 'grab'
+      canvas.defaultCursor = 'grabbing'
       return
     }
-    if (!currentImageId.value || !bgObject) return
+    if (e.button !== 0) return
+    if (!currentImageId.value || !bgObject || metaDialogVisible.value) return
     if (tool.value === 'rect') {
       isDrawingRect = true
       // Draw in scene coordinates so image rotation does not tilt a new rectangle.
       rectStartScene = getScenePoint(e)
       rectEndScene = { ...rectStartScene }
+      rectRawEndScene = { ...rectStartScene }
+      isDrawingSize.value = true
       const abs = [
         { x: rectStartScene.x, y: rectStartScene.y },
         { x: rectStartScene.x, y: rectStartScene.y },
@@ -1620,19 +1752,8 @@ const bindCanvasEvents = () => {
       return
     }
     if (tool.value === 'rect' && isDrawingRect && drawingRect) {
-      rectEndScene = getScenePoint(e)
-      const x0 = Math.min(rectStartScene.x, rectEndScene.x)
-      const y0 = Math.min(rectStartScene.y, rectEndScene.y)
-      const x1 = Math.max(rectStartScene.x, rectEndScene.x)
-      const y1 = Math.max(rectStartScene.y, rectEndScene.y)
-      const abs = [
-        { x: x0, y: y0 },
-        { x: x1, y: y0 },
-        { x: x1, y: y1 },
-        { x: x0, y: y1 }
-      ]
-      setRectAbsPoints(drawingRect, abs)
-      canvas.requestRenderAll()
+      rectRawEndScene = getScenePoint(e)
+      updateDrawingRectangle(e.shiftKey || isShiftDown)
       return
     }
     if (tool.value === 'polygon' && drawingLine && polyPoints.length) {
@@ -1648,13 +1769,13 @@ const bindCanvasEvents = () => {
   canvas.on('mouse:up', () => {
     if (!canvas) return
     if (isPanning) {
-      isPanning = false
-      canvas.defaultCursor = tool.value === 'select' ? 'default' : 'crosshair'
+      endPanning()
       return
     }
     if (tool.value === 'rect' && isDrawingRect && drawingRect) {
       const r = drawingRect
       isDrawingRect = false
+      isDrawingSize.value = false
       drawingRect = null
       const vw = Math.abs(rectEndScene.x - rectStartScene.x)
       const vh = Math.abs(rectEndScene.y - rectStartScene.y)
@@ -1846,6 +1967,7 @@ onMounted(async () => {
   applyRouteAnnotation()
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
+  window.addEventListener('blur', onWindowBlur)
   window.addEventListener('focus', refreshCurrentImageFromBackend)
 })
 
@@ -1857,6 +1979,7 @@ onUnmounted(() => {
   cleanupCanvas()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('keyup', onKeyup)
+  window.removeEventListener('blur', onWindowBlur)
   window.removeEventListener('focus', refreshCurrentImageFromBackend)
 })
 
@@ -1894,6 +2017,19 @@ watch(
 </script>
 
 <style scoped>
+
+.annotation-size { position: absolute; z-index: 4; }
+.size-label { color: #fff; background: #24272d; border: 1px solid #555b65; border-radius: 3px; padding: 5px 9px; font: 14px monospace; cursor: pointer; white-space: nowrap; }
+.size-label:disabled { cursor: default; opacity: 1; }
+.size-inline { display: flex; align-items: center; gap: 5px; cursor: default; }
+.size-inline input { width: 56px; padding: 0; border: 0; border-bottom: 1px solid #a7caff; outline: none; background: transparent; color: inherit; font: inherit; text-align: center; appearance: textfield; }
+.size-inline input::-webkit-inner-spin-button, .size-inline input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.size-inline input:focus { border-color: #fff; }
+.annotation-draft { margin-bottom: 12px; }
+.draft-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.draft-hint { font-size: 12px; line-height: 1.6; color: #606266; margin-bottom: 12px; }
+.draft-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 .annotate {
   display: flex;
   flex-direction: column;
@@ -1945,6 +2081,7 @@ watch(
 
 .canvas-wrap {
   flex: 1;
+  min-width: 0;
   position: relative;
   background: #fff;
   border: 1px solid #dcdfe6;
@@ -2008,10 +2145,16 @@ watch(
 @media (max-width: 1200px) {
   .workspace {
     flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .canvas-wrap {
+    flex: 0 0 520px;
   }
 
   .sidebar {
-    width: 100%;
+    width: auto;
+    overflow-y: visible;
   }
 }
 </style>

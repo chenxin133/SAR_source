@@ -7,6 +7,7 @@ import pathlib
 import uuid
 
 from app.config import get_settings
+from fastapi import HTTPException
 
 
 def _upload_dir(upload_id: uuid.UUID) -> pathlib.Path:
@@ -14,11 +15,11 @@ def _upload_dir(upload_id: uuid.UUID) -> pathlib.Path:
     return pathlib.Path(settings.upload_tmp_dir) / str(upload_id)
 
 
-def init_upload(*, filename: str, total_size: int) -> dict:
+def init_upload(*, filename: str, total_size: int, project_id: uuid.UUID | None = None) -> dict:
     upload_id = uuid.uuid4()
     d = _upload_dir(upload_id)
     d.mkdir(parents=True, exist_ok=True)
-    (d / "upload.json").write_text(json.dumps({"filename": filename}, ensure_ascii=False), encoding="utf-8")
+    (d / "upload.json").write_text(json.dumps({"filename": filename, "project_id": str(project_id) if project_id else None}, ensure_ascii=False), encoding="utf-8")
     settings = get_settings()
     return {
         "upload_id": str(upload_id),
@@ -26,6 +27,15 @@ def init_upload(*, filename: str, total_size: int) -> dict:
         "filename": filename,
         "total_size": total_size,
     }
+
+
+def require_upload_project(upload_id: uuid.UUID, project_id: uuid.UUID) -> None:
+    try:
+        info = json.loads((_upload_dir(upload_id) / "upload.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise HTTPException(404, "Upload not found")
+    if info.get("project_id") not in (None, str(project_id)):
+        raise HTTPException(404, "Upload not found")
 
 
 def get_upload_filename(upload_id: uuid.UUID) -> str | None:
@@ -39,6 +49,7 @@ def get_upload_filename(upload_id: uuid.UUID) -> str | None:
 def write_part(*, upload_id: uuid.UUID, part_no: int, data: bytes) -> int:
     d = _upload_dir(upload_id)
     d.mkdir(parents=True, exist_ok=True)
+    (d / "assembled.json").unlink(missing_ok=True)
     p = d / f"part_{part_no:06d}"
     p.write_bytes(data)
     return p.stat().st_size
@@ -52,6 +63,11 @@ def has_part(*, upload_id: uuid.UUID, part_no: int) -> bool:
 def assemble(*, upload_id: uuid.UUID, total_parts: int) -> tuple[str, str, int]:
     d = _upload_dir(upload_id)
     out_path = d / "assembled.bin"
+    cache = d / "assembled.json"
+    if cache.exists() and out_path.exists():
+        info = json.loads(cache.read_text(encoding="utf-8"))
+        if info["total_parts"] == total_parts and info["size"] == out_path.stat().st_size:
+            return str(out_path), info["sha256"], info["size"]
     h = hashlib.sha256()
     size = 0
     with out_path.open("wb") as out:
@@ -63,6 +79,7 @@ def assemble(*, upload_id: uuid.UUID, total_parts: int) -> tuple[str, str, int]:
             out.write(chunk)
             h.update(chunk)
             size += len(chunk)
+    cache.write_text(json.dumps({"total_parts": total_parts, "sha256": h.hexdigest(), "size": size}), encoding="utf-8")
     return str(out_path), h.hexdigest(), size
 
 

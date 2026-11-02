@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpError, requestJson } from '../http'
+import { samplesApi } from '../samplesApi'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('API error messages', () => {
+  it('shows the failing sample from export errors without exposing the JSON envelope', async () => {
+    const detail = '样本“舰船_C_1m_0001”（test-id）导出失败：样本文件缺失'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), {
+      status: 404, headers: { 'Content-Type': 'application/json' }
+    })))
+    await expect(samplesApi.exportBundle(['test-id'], 'source')).rejects.toThrow(detail)
+  })
   it('shows the missing original explanation from the backend', async () => {
     const detail = '原始影像文件缺失：source.tif。请恢复该影像的原文件后重试。'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail }), {

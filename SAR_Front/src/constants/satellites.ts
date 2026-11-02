@@ -4,10 +4,11 @@ export type SatelliteEntry = {
 }
 
 export const entrySatellites: SatelliteEntry[] = [
-  { id: 'qilu-1', name: '齐鲁一号' },
+  { id: 'gaofen-3', name: '高分三号' },
+  { id: 'qilu-1', name: '齐鲁一号星' },
   { id: 'taijing-4-03', name: '泰景四号03星' },
   { id: 'hongtu-1', name: '航天宏图一号' },
-  { id: 'luojia-1-01', name: '珞珈二号' },
+  { id: 'luojia-1-01', name: '珞珈二号01星' },
   { id: 'haisi-1', name: '海丝一号' },
   { id: 'chaohu-1', name: '巢湖一号' },
   { id: 'fucheng-1', name: '涪城一号' }
@@ -17,7 +18,12 @@ export const getSatelliteNameById = (id: string) => {
   return entrySatellites.find((s) => s.id === id)?.name ?? id
 }
 
-export const normalizeSatelliteName = (name: string) => name.trim()
+const satelliteAliases: Record<string, string> = {
+  '齐鲁一号': '齐鲁一号星', '齐鲁1号': '齐鲁一号星', 'QL-1': '齐鲁一号星',
+  '珞珈二号': '珞珈二号01星', '珞珈一号01星': '珞珈二号01星',
+  '高分3号': '高分三号', 'GF3': '高分三号', 'GF-3': '高分三号'
+}
+export const normalizeSatelliteName = (name: string) => satelliteAliases[name.trim()] || name.trim()
 
 export const dedupeSatelliteNames = (names: string[]) => {
   const seen = new Set<string>()
