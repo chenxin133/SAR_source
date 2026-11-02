@@ -6,14 +6,14 @@ import RawDataView from '../RawDataView.vue'
 import SampleDataView from '../SampleDataView.vue'
 import { UNKNOWN_RESOLUTION } from '../../../utils/resolution'
 
-const state = vi.hoisted(() => ({ images: [] as any[], samples: [] as any[], exportBundle: vi.fn() }))
+const state = vi.hoisted(() => ({ images: [] as any[], samples: [] as any[], exportBundle: vi.fn(), ensurePreview: vi.fn() }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('../../../config/storage', () => ({ getStorageMode: () => 'backend' }))
 vi.mock('../../../stores/rawData', () => ({ useRawDataStore: () => reactive({ images: state.images, fetchImages: vi.fn(), loading: false }) }))
-vi.mock('../../../repositories/imagesRepo', () => ({ imagesRepo: { list: async () => state.images } }))
+vi.mock('../../../repositories/imagesRepo', () => ({ imagesRepo: { list: async () => state.images, ensureHighResolutionPreview: state.ensurePreview } }))
 vi.mock('../../../repositories/samplesRepo', () => ({ samplesRepo: { list: async () => state.samples, exportBundle: state.exportBundle, changedEventName: 'test-samples-changed' } }))
 let wrapper: ReturnType<typeof mount>
-afterEach(() => { wrapper?.unmount(); vi.restoreAllMocks(); state.exportBundle.mockReset() })
+afterEach(() => { wrapper?.unmount(); vi.restoreAllMocks(); state.exportBundle.mockReset(); state.ensurePreview.mockReset() })
 
 const setFilter = async (placeholder: string, value: string) => {
   const select = wrapper.findAllComponents(ElSelect).find((select) => select.props('placeholder') === placeholder)!
@@ -21,6 +21,18 @@ const setFilter = async (placeholder: string, value: string) => {
   await nextTick()
 }
 const rowIds = () => (wrapper.findComponent(ElTable).props('data') as any[]).map((row) => row.id)
+
+it('lets a failed image regenerate previews in place without another upload', async () => {
+  state.images = [{ id: 'failed-image', name: 'huge.tif', status: 'failed', errorMessage: 'Image size exceeds limit' }]
+  state.ensurePreview.mockResolvedValue({ id: 'failed-image', name: 'huge.tif', status: 'ready', errorMessage: '', previewUrl: '/new.webp' })
+  wrapper = mount(RawDataView, { global: { plugins: [ElementPlus], stubs: { RawImageUploadDialog: true, ImageViewer: true, Upload: true, Picture: true, Edit: true } } })
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === '重新生成预览')!.trigger('click')
+  await flushPromises()
+  expect(state.ensurePreview).toHaveBeenCalledExactlyOnceWith('failed-image', 8192, true)
+  expect(state.images[0]).toMatchObject({ id: 'failed-image', status: 'ready', errorMessage: '' })
+  expect(wrapper.findAll('button').some(button => button.text() === '重新生成预览')).toBe(false)
+})
 
 it('filters original images by normalized resolution together with other filters and clears it', async () => {
   state.images = [

@@ -311,11 +311,11 @@ export const imagesRepo = {
     return undefined
   },
 
-  async ensureHighResolutionPreview(id: string, minLevel = 8192): Promise<SarImage | undefined> {
+  async ensureHighResolutionPreview(id: string, minLevel = 8192, force = false): Promise<SarImage | undefined> {
     if (getStorageMode() !== 'backend') return undefined
     let thumbs = await imagesApi.getThumbnails(id).catch(() => [])
     const currentMax = Math.max(0, ...thumbs.map((thumbnail) => Number(thumbnail.level || 0)))
-    if (currentMax < minLevel) {
+    if (force || currentMax < minLevel) {
       const { task_id } = await imagesApi.process(id)
       const result = await waitTask(task_id, { timeoutMs: 5 * 60_000, preferSse: true })
       if (String(result.status).toLowerCase() !== 'succeeded') {

@@ -69,6 +69,8 @@
               <el-icon><Edit /></el-icon> 标注
             </el-button>
             <el-button class="table-actions__button" size="small" @click="handleView(scope.row)">查看详情</el-button>
+            <el-button v-if="isBackendMode && scope.row.status === 'failed'" class="table-actions__button" size="small" type="warning" plain
+              :loading="regeneratingId === scope.row.id" :disabled="!!regeneratingId" @click="handleRegeneratePreview(scope.row)">重新生成预览</el-button>
             <el-button class="table-actions__button" size="small" type="danger" @click="handleDelete(scope.row)">删除</el-button>
           </div>
         </template>
@@ -131,6 +133,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRawDataStore } from '../../stores/rawData'
+import { imagesRepo } from '../../repositories/imagesRepo'
 import type { SarImage } from '../../types/sar'
 import ImageViewer from '../../components/ImageViewer.vue'
 import RawImageUploadDialog from '../../components/raw/RawImageUploadDialog.vue'
@@ -143,6 +146,21 @@ import { buildResolutionOptions, resolutionKey, resolutionLabel } from '../../ut
 const store = useRawDataStore()
 const router = useRouter()
 const isBackendMode = computed(() => getStorageMode() === 'backend')
+const regeneratingId = ref('')
+const handleRegeneratePreview = async (row: SarImage) => {
+    if (regeneratingId.value) return
+    regeneratingId.value = row.id
+    try {
+        const saved = await imagesRepo.ensureHighResolutionPreview(row.id, 8192, true)
+        if (saved) Object.assign(row, saved)
+        ElMessage.success('预览已重新生成，无需重新上传')
+    } catch (error) {
+        ElMessage.error(error instanceof Error ? error.message : '预览重新生成失败')
+        await store.fetchImages()
+    } finally {
+        regeneratingId.value = ''
+    }
+}
 const keyword = ref('')
 const statusFilter = ref('')
 const satelliteFilter = ref('')

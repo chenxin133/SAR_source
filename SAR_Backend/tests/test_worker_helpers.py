@@ -125,6 +125,39 @@ def test_sample_raster_for_preview_downsamples_2d():
     assert sampled.shape == (4, 4)
 
 
+@pytest.mark.parametrize('suffix', ['.tif', ''])
+def test_pillow_preview_accepts_large_tiff_without_changing_generic_image_limits(tmp_path, monkeypatch, suffix):
+    from PIL import Image as PILImage
+    values = (np.arange(80 * 120).reshape(80, 120) + 1000).astype(np.float32)
+    path = tmp_path / ('source' + suffix)
+    PILImage.fromarray(values).save(path, format='TIFF', compression='tiff_lzw')
+    png = tmp_path / 'ordinary.tif'
+    PILImage.fromarray(np.zeros((80, 120), dtype=np.uint8)).save(png, format='PNG')
+    monkeypatch.setattr(PILImage, 'MAX_IMAGE_PIXELS', 100)
+    with pytest.raises(PILImage.DecompressionBombError):
+        PILImage.open(path)
+    monkeypatch.setattr(tasks, '_read_preview_with_gdal', lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError('no gdal')))
+    monkeypatch.setattr(tasks, '_read_preview_with_tifffile', lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError('requires imagecodecs')))
+    rgb = tasks._build_preview_rgb(str(path), max_size=60)
+    assert rgb.shape == (40, 60, 3) and len(np.unique(rgb[..., 0])) > 100
+    assert PILImage.MAX_IMAGE_PIXELS == 100
+    with pytest.raises(PILImage.DecompressionBombError):
+        tasks._read_preview_with_pillow(str(png), max_size=60)
+
+
+def test_pillow_dimension_fallback_accepts_large_tiff(tmp_path, monkeypatch):
+    from PIL import Image as PILImage
+    import sys
+    import tifffile
+    path = tmp_path / 'source'
+    PILImage.fromarray(np.zeros((80, 120), dtype=np.uint8)).save(path, format='TIFF')
+    monkeypatch.setattr(PILImage, 'MAX_IMAGE_PIXELS', 100)
+    monkeypatch.setitem(sys.modules, 'osgeo', None)
+    monkeypatch.setattr(tifffile, 'TiffFile', lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError('reader unavailable')))
+    assert tasks._read_source_dimensions(str(path)) == (120, 80)
+    assert PILImage.MAX_IMAGE_PIXELS == 100
+
+
 def test_sample_raster_for_preview_handles_channel_last():
     arr = np.zeros((10, 10, 3), dtype=np.float32)
     sampled = tasks._sample_raster_for_preview(arr, max_size=4)

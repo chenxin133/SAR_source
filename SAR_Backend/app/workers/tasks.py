@@ -177,13 +177,23 @@ def _sample_raster_for_preview(arr: np.ndarray, max_size: int) -> np.ndarray:
     raise RuntimeError(f"Unsupported TIFF shape: {arr.shape!r}")
 
 
+def _open_raster_with_pillow(path: str):
+    from PIL import Image as PILImage, TiffImagePlugin
+
+    with open(path, 'rb') as stream:
+        is_tiff = stream.read(4) in (b'II*\x00', b'MM\x00*', b'II+\x00', b'MM\x00+')
+    # SAR TIFFs routinely exceed Pillow's generic image pixel limit. Match
+    # source cropping's TIFF reader without changing limits for other images.
+    return TiffImagePlugin.TiffImageFile(path) if is_tiff else PILImage.open(path)
+
+
 def _read_preview_with_pillow(path: str, max_size: int) -> np.ndarray:
     try:
         from PIL import Image as PILImage
     except Exception as e:
         raise RuntimeError("Pillow not available") from e
 
-    with PILImage.open(path) as img:
+    with _open_raster_with_pillow(path) as img:
         numeric = img.mode in ('F', 'I') or img.mode.startswith('I;16')
         if img.mode.startswith('I;16'):
             # Pillow cannot bilinearly resize I;16. Float preserves every
@@ -356,9 +366,7 @@ def _read_source_dimensions(path: str) -> tuple[int, int]:
     except Exception:
         pass
 
-    from PIL import Image as PILImage
-
-    with PILImage.open(path) as opened:
+    with _open_raster_with_pillow(path) as opened:
         return int(opened.width), int(opened.height)
 
 
