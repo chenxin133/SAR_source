@@ -24,6 +24,7 @@ class PutObjectResult:
 _s3 = None
 _s3_presign = None
 _KNOWN_CONTENT_TYPES = {
+    ".xml": "application/xml",
     ".webp": "image/webp",
     ".png": "image/png",
     ".jpg": "image/jpeg",
