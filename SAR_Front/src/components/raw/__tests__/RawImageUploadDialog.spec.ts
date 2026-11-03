@@ -68,3 +68,20 @@ it('adds GF3 entry, accepts its XML alias and blocks XML from a different satell
   expect(submit().props('disabled')).toBe(true)
   expect(wrapper.text()).toContain('与当前入口不同')
 })
+
+it.each([
+  ['GF3', '高分三号'], ['QL1', '齐鲁一号星'], ['TJ04-3', '泰景四号03星'],
+  ['HT1-A', '航天宏图一号'], ['LJ2-01', '珞珈二号01星'],
+  ['HS-01', '海丝一号'], ['CH-01', '巢湖一号'], ['FC-01', '涪城一号']
+])('accepts XML code %s only in its matching satellite entry', async (code, name) => {
+  const form = setup({ satellitePreset: name, satelliteReadonly: true })
+  const submit = () => wrapper.findAllComponents(ElButton).find(button => button.text() === '确定上传')!
+  await parse(attachment({ satellite: code }))
+  expect(form.satellite).toBe(name)
+  expect(submit().props('disabled')).toBe(false)
+  expect(wrapper.text()).not.toContain('与当前入口不同')
+  await parse(attachment({ satellite: code === 'TJ04-3' ? 'GF3' : 'TJ04-3' }))
+  expect(submit().props('disabled')).toBe(true)
+  expect(form.satellite).toBe(name)
+  expect(wrapper.text()).toContain('与当前入口不同')
+})

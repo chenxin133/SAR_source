@@ -11,15 +11,17 @@ from app.sample_resolution import resolution_meters
 
 MAX_XML_BYTES = 2 * 1024 * 1024
 SATELLITE_ALIASES = {
-    '齐鲁一号': '齐鲁一号星', '齐鲁1号': '齐鲁一号星', 'QL-1': '齐鲁一号星',
-    '珞珈二号': '珞珈二号01星', '珞珈一号01星': '珞珈二号01星',
+    '齐鲁一号': '齐鲁一号星', '齐鲁1号': '齐鲁一号星', 'QL-1': '齐鲁一号星', 'QL1': '齐鲁一号星',
+    '珞珈二号': '珞珈二号01星', '珞珈一号01星': '珞珈二号01星', 'LJ2-01': '珞珈二号01星',
     '高分3号': '高分三号', 'GF3': '高分三号', 'GF-3': '高分三号',
+    'TJ04-3': '泰景四号03星', 'HT1-A': '航天宏图一号',
+    'HS-01': '海丝一号', 'CH-01': '巢湖一号', 'FC-01': '涪城一号',
 }
 
 
 def satellite_name(value: str | None) -> str | None:
     text = (value or '').strip()
-    return SATELLITE_ALIASES.get(text, text) or None
+    return SATELLITE_ALIASES.get(text.upper(), text) or None
 
 
 def parse_scene_xml(content: bytes) -> dict:

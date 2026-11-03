@@ -19,11 +19,13 @@ export const getSatelliteNameById = (id: string) => {
 }
 
 const satelliteAliases: Record<string, string> = {
-  '齐鲁一号': '齐鲁一号星', '齐鲁1号': '齐鲁一号星', 'QL-1': '齐鲁一号星',
-  '珞珈二号': '珞珈二号01星', '珞珈一号01星': '珞珈二号01星',
-  '高分3号': '高分三号', 'GF3': '高分三号', 'GF-3': '高分三号'
+  '齐鲁一号': '齐鲁一号星', '齐鲁1号': '齐鲁一号星', 'QL-1': '齐鲁一号星', 'QL1': '齐鲁一号星',
+  '珞珈二号': '珞珈二号01星', '珞珈一号01星': '珞珈二号01星', 'LJ2-01': '珞珈二号01星',
+  '高分3号': '高分三号', 'GF3': '高分三号', 'GF-3': '高分三号',
+  'TJ04-3': '泰景四号03星', 'HT1-A': '航天宏图一号',
+  'HS-01': '海丝一号', 'CH-01': '巢湖一号', 'FC-01': '涪城一号'
 }
-export const normalizeSatelliteName = (name: string) => satelliteAliases[name.trim()] || name.trim()
+export const normalizeSatelliteName = (name: string) => satelliteAliases[name.trim().toUpperCase()] || name.trim()
 
 export const dedupeSatelliteNames = (names: string[]) => {
   const seen = new Set<string>()

@@ -32,3 +32,18 @@ it('adds the Gaofen entry and normalizes old names without changing entry route 
   expect(normalizeSatelliteName('齐鲁一号')).toBe('齐鲁一号星')
   expect(normalizeSatelliteName('GF-3')).toBe('高分三号')
 })
+
+it.each([
+  ['GF3', '高分三号'], ['QL1', '齐鲁一号星'], ['TJ04-3', '泰景四号03星'],
+  ['HT1-A', '航天宏图一号'], ['LJ2-01', '珞珈二号01星'],
+  ['HS-01', '海丝一号'], ['CH-01', '巢湖一号'], ['FC-01', '涪城一号']
+])('matches scene code %s to its existing entry', (code, name) => {
+  expect(entrySatellites.some(entry => entry.name === name)).toBe(true)
+  for (const value of [code, code.toLowerCase(), `  ${code}  `, name]) {
+    expect(normalizeSatelliteName(value)).toBe(name)
+  }
+})
+
+it.each(['TJ04-30', 'HT2-02D', 'QL10', ' Custom-Satellite '])('retains the identity of unrecognized satellite %s', value => {
+  expect(normalizeSatelliteName(value)).toBe(value.trim())
+})
