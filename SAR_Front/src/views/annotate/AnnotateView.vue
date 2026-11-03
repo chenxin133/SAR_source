@@ -97,6 +97,7 @@
           <el-table
             :data="annotations"
             style="width: 100%"
+            height="100%"
             highlight-current-row
             row-key="id"
             :current-row-key="selectedAnnotationId || undefined"
@@ -2121,13 +2122,16 @@ watch(
 }
 
 .panel-list {
-  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 160px;
+  overflow: hidden;
 }
 
 .panel-props {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
+  flex: 0 0 auto;
+  min-height: 320px;
 }
 
 .panel-title {
@@ -2155,6 +2159,10 @@ watch(
   .sidebar {
     width: auto;
     overflow-y: visible;
+  }
+
+  .panel-list {
+    flex: 0 0 320px;
   }
 }
 </style>
