@@ -3,20 +3,42 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.db import get_db
 from app.deps import get_project
-from app.models import Project, Task
+from app.models import EchoSignal, Project, Task
+from app.duplicate_files import import_lock
 from app.schemas.common import Envelope
 from app.storage import put_file
 from app.workers.celery_app import celery_app
 
 
 router = APIRouter()
+
+
+class DuplicateCheckRequest(BaseModel):
+    resource: Literal['samples', 'echoes']
+    checksum_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+@router.post('/check', response_model=Envelope[dict])
+def check_duplicate(payload: DuplicateCheckRequest, db: Session = Depends(get_db), project: Project = Depends(get_project)):
+    with import_lock:
+        if payload.resource == 'samples':
+            from app.api.routes.samples import find_imported_sample
+            existing = find_imported_sample(db, project.id, payload.checksum_sha256)
+        else:
+            existing = db.scalar(select(EchoSignal).where(
+                EchoSignal.project_id == project.id, EchoSignal.checksum_sha256 == payload.checksum_sha256,
+            ).order_by(EchoSignal.created_at, EchoSignal.id))
+        return Envelope(data={'existing': {'id': str(existing.id), 'name': existing.name} if existing else None})
 
 
 @router.post("", response_model=Envelope[dict], status_code=202)

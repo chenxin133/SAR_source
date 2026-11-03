@@ -21,6 +21,7 @@ interface ImportMeta {
 }
 
 interface SarDesktopBridge {
+  fingerprintFile?(file: Blob, onProgress?: (fraction: number) => void): Promise<string | null>
   findCompanionXml?(file: File): Promise<
     { status: 'found'; filename: string; base64: string; match: 'same-name' | 'copy-name' | 'only-xml' } |
     { status: 'not-found' } | { status: 'unavailable' } | { status: 'ambiguous'; filenames: string[] }

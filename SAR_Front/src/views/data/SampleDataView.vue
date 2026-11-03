@@ -29,28 +29,13 @@
 
     <div class="filter-bar">
       <el-input v-model="keyword" placeholder="筛选名称 / 样本ID" clearable style="width: 240px" />
-      <el-select v-model="categoryFilter" placeholder="全部类别" clearable style="width: 180px">
-        <el-option v-for="item in categoryOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="annotationFilter" placeholder="全部标注类型" clearable style="width: 160px">
-        <el-option v-if="annotationOptions.includes('rect')" label="矩形" value="rect" />
-        <el-option v-if="annotationOptions.includes('polygon')" label="多边形" value="polygon" />
-      </el-select>
-      <el-select v-model="sourceFilter" placeholder="全部来源影像" clearable style="width: 220px">
-        <el-option v-for="item in sourceOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px">
-        <el-option v-for="item in regionOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="frequencyBandFilter" placeholder="全部数据频段" clearable style="width: 180px">
-        <el-option v-for="item in frequencyBandOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
-        <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="resolutionFilter" placeholder="全部分辨率" clearable filterable style="width: 180px">
-        <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
+      <PinnedFilterSelect v-model="categoryFilter" placeholder="全部类别" clearable style="width: 180px" preference-key="samples-categoryFilter" :options="categoryOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="annotationFilter" placeholder="全部标注类型" clearable style="width: 160px" preference-key="samples-annotationFilter" :options="annotationOptions.map(value => ({ value, label: value === 'polygon' ? '多边形' : '矩形' }))" />
+      <PinnedFilterSelect v-model="sourceFilter" placeholder="全部来源影像" clearable style="width: 220px" preference-key="samples-sourceFilter" :options="sourceOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px" preference-key="samples-regionFilter" :options="regionOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="frequencyBandFilter" placeholder="全部数据频段" clearable style="width: 180px" preference-key="samples-frequencyBandFilter" :options="frequencyBandOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px" preference-key="samples-polarizationFilter" :options="polarizationOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="resolutionFilter" placeholder="全部分辨率" clearable filterable style="width: 180px" preference-key="samples-resolutionFilter" :options="resolutionOptions" />
     </div>
 
     <div class="batch-scope">
@@ -183,6 +168,7 @@
 </template>
 
 <script setup lang="ts">
+import PinnedFilterSelect from '../../components/PinnedFilterSelect.vue'
 import XmlMetadataPicker from '../../components/XmlMetadataPicker.vue'
 import type { XmlAttachment } from '../../types/metadata'
 import { applyXmlAutofill, clearXmlAutofill } from '../../utils/xmlAutofill'

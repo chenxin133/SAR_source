@@ -10,7 +10,7 @@
     <el-alert v-if="mismatch" title="XML 中的影像文件名与当前文件不同，请核对是否为配套文件。" type="warning" :closable="false" />
     <div v-if="metadata" class="xml-summary">
       <span v-if="metadata.data_source">数据源：{{ metadata.data_source }}；</span>
-      <span v-if="metadata.width && metadata.height">XML 尺寸：{{ metadata.width }} × {{ metadata.height }} px；</span>
+      <span v-if="metadata.width && metadata.height">影像尺寸：{{ metadata.width }} × {{ metadata.height }} px；</span>
       <span v-if="metadata.time_reference">时间基准：{{ metadata.time_reference }}；</span>
       <span v-if="metadata.coordinates.center">中心：{{ metadata.coordinates.center.longitude }}, {{ metadata.coordinates.center.latitude }}</span>
     </div>

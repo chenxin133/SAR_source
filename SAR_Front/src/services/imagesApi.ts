@@ -1,4 +1,4 @@
-import { withDuplicateChoice } from '../utils/duplicateImport'
+import { withDuplicateChoice, type DuplicateAction } from '../utils/duplicateImport'
 import { buildUrl, requestJson } from './http'
 import type {
   ApiEnvelope,
@@ -8,6 +8,19 @@ import type {
   ApiUploadInitResponse
 } from '../types/backend'
 import { unwrapEnvelope } from '../types/backend'
+
+type UploadMetadata = {
+  metadata_xml_base64?: string
+  metadata_xml_filename?: string
+  name?: string
+  mime_type?: string
+  satellite?: string
+  acquisition_at?: string
+  resolution?: string
+  frequency_band?: string
+  polarization?: string
+  description?: string
+}
 
 export const imagesApi = {
   async update(imageId: string, patch: Partial<Pick<ApiImageOut,
@@ -61,12 +74,15 @@ export const imagesApi = {
     await requestJson<ApiEnvelope<unknown>>(`/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' })
   },
 
-  async uploadInit(payload: { filename: string; total_size: number }): Promise<ApiUploadInitResponse> {
-    const res = await requestJson<ApiEnvelope<ApiUploadInitResponse>>('/images/upload/init', {
-      method: 'POST',
-      body: JSON.stringify(payload)
+  async uploadInit(payload: UploadMetadata & { filename: string; total_size: number; checksum_sha256?: string }): Promise<ApiUploadInitResponse> {
+    let chosen: DuplicateAction = 'ask'
+    const res = await withDuplicateChoice((action) => {
+      chosen = action
+      return requestJson<ApiEnvelope<ApiUploadInitResponse>>('/images/upload/init', {
+        method: 'POST', body: JSON.stringify({ ...payload, duplicate_action: action })
+      })
     })
-    return unwrapEnvelope(res)
+    return { ...unwrapEnvelope(res), duplicate_action: chosen }
   },
 
   async uploadPart(uploadId: string, partNo: number, chunk: Blob): Promise<{ stored_bytes: number }> {
@@ -80,19 +96,10 @@ export const imagesApi = {
     return unwrapEnvelope(res)
   },
 
-  async uploadComplete(payload: {
+  async uploadComplete(payload: UploadMetadata & {
     upload_id: string
-    metadata_xml_base64?: string
-    metadata_xml_filename?: string
     total_parts: number
-    name?: string
-    mime_type?: string
-    satellite?: string
-    acquisition_at?: string
-    resolution?: string
-    frequency_band?: string
-    polarization?: string
-    description?: string
+    duplicate_action?: DuplicateAction
   }): Promise<ApiUploadCompleteResponse> {
     const res = await withDuplicateChoice((action) => requestJson<ApiEnvelope<ApiUploadCompleteResponse>>(
       `/images/upload/${encodeURIComponent(payload.upload_id)}/complete`,
@@ -113,7 +120,7 @@ export const imagesApi = {
           description: payload.description
         })
       }
-    ))
+    ), payload.duplicate_action)
     return unwrapEnvelope(res)
   },
 

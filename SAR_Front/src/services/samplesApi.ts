@@ -1,4 +1,5 @@
 import { withDuplicateChoice } from '../utils/duplicateImport'
+import { importPreflight } from './importPreflight'
 import { buildUrl, requestJson, readResponseError } from './http'
 import { unwrapEnvelope, type ApiEnvelope } from '../types/backend'
 import type { SarSample } from '../types/samples'
@@ -70,6 +71,12 @@ export const samplesApi = {
   },
 
   async put(sample: SarSample): Promise<SarSample> {
+    const preflight = !sample.imageId && !/^[0-9a-f-]{36}$/i.test(sample.id)
+      ? await importPreflight('samples', sample.image) : { action: 'ask' as const, existing: null }
+    if (preflight.action === 'reuse' && preflight.existing) {
+      const row = unwrapEnvelope(await requestJson<ApiEnvelope<ApiSample>>(`/samples/${preflight.existing.id}`))
+      return await mapSample(row)
+    }
     const form = new FormData()
     if (sample.imageId) form.append('image_id', sample.imageId)
     form.append('name', sample.name)
@@ -92,7 +99,7 @@ export const samplesApi = {
     const row = unwrapEnvelope(await withDuplicateChoice((action) => {
       form.set('duplicate_action', action)
       return requestJson<ApiEnvelope<ApiSample>>('/samples/upload', { method: 'POST', body: form })
-    }))
+    }, preflight.action))
     return await mapSample(row)
   },
 

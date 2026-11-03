@@ -1,3 +1,5 @@
+import { fingerprintFile } from '../utils/fingerprintFile'
+import { validateRasterProduct } from '../utils/rasterProduct'
 import { normalizeSatelliteName } from '../constants/satellites'
 import { ImportCancelledError } from '../utils/duplicateImport'
 import type { ImageMetadataPatch, SarImage, UploadPayload } from '../types/sar'
@@ -212,34 +214,18 @@ export const imagesRepo = {
       return await rawImagesRepo.create(payload, onProgress)
     }
 
-    onStage?.('正在传输原始影像')
     const file = payload.file
-    const init = await imagesApi.uploadInit({ filename: file.name, total_size: file.size })
-    const partSize = Math.max(1, Number(init.part_size))
-    const totalParts = Math.max(1, Math.ceil(file.size / partSize))
-
-    const uploadWeight = 0.7
-    const processWeight = 0.3
     const setP = (p01: number) => onProgress?.(Math.round(Math.max(0, Math.min(1, p01)) * 100))
-
-    // 上传分片（0% ~ 70%）
-    let uploaded = 0
-    for (let partNo = 1; partNo <= totalParts; partNo++) {
-      const start = (partNo - 1) * partSize
-      const end = Math.min(file.size, partNo * partSize)
-      const chunk = file.slice(start, end)
-      await imagesApi.uploadPart(init.upload_id, partNo, chunk)
-      uploaded += chunk.size
-      const p01 = (uploaded / Math.max(1, file.size)) * uploadWeight
-      setP(p01)
-    }
-
-    onStage?.('正在校验并保存原始影像')
-    const completed = await imagesApi.uploadComplete({
-      upload_id: init.upload_id,
+    onStage?.('正在检查影像产品类型')
+    await validateRasterProduct(file)
+    onStage?.('正在本机检查重复文件')
+    const checksum = await fingerprintFile(file, fraction => {
+      setP(fraction * 0.1)
+      onStage?.(`正在本机检查重复文件（${Math.round(fraction * 100)}%）`)
+    })
+    const metadata = {
       metadata_xml_base64: payload.metadataXmlBase64,
       metadata_xml_filename: payload.metadataXmlFilename,
-      total_parts: totalParts,
       name: payload.name || file.name,
       mime_type: file.type || undefined,
       satellite: payload.satellite || undefined,
@@ -248,8 +234,41 @@ export const imagesRepo = {
       frequency_band: payload.frequencyBand || undefined,
       polarization: payload.polarization || undefined,
       description: payload.description || undefined
+    }
+    const init = await imagesApi.uploadInit({ filename: file.name, total_size: file.size, checksum_sha256: checksum, ...metadata })
+    if (init.image_id) {
+      const detail = await imagesApi.getDetail(init.image_id)
+      setP(1)
+      return mapApiImageToSarImage(detail.image, detail.thumbnails)
+    }
+    if (!init.upload_id || !init.part_size) throw new Error('上传初始化响应缺少分片信息')
+    const uploadId = init.upload_id
+    const partSize = Math.max(1, Number(init.part_size))
+    const totalParts = Math.max(1, Math.ceil(file.size / partSize))
+    const uploadWeight = 0.7
+    const processWeight = 0.3
+    onStage?.('正在传输原始影像')
+
+    // 上传分片（0% ~ 70%）
+    let uploaded = 0
+    for (let partNo = 1; partNo <= totalParts; partNo++) {
+      const start = (partNo - 1) * partSize
+      const end = Math.min(file.size, partNo * partSize)
+      const chunk = file.slice(start, end)
+      await imagesApi.uploadPart(uploadId, partNo, chunk)
+      uploaded += chunk.size
+      const p01 = 0.1 + (uploaded / Math.max(1, file.size)) * 0.6
+      setP(p01)
+    }
+
+    onStage?.('正在校验并保存原始影像')
+    const completed = await imagesApi.uploadComplete({
+      ...metadata,
+      upload_id: uploadId,
+      total_parts: totalParts,
+      duplicate_action: init.duplicate_action
     }).catch(async (error) => {
-      if (error instanceof ImportCancelledError) await imagesApi.cancelUpload(init.upload_id)
+      if (error instanceof ImportCancelledError) await imagesApi.cancelUpload(uploadId)
       throw error
     })
     if (completed.reused) {

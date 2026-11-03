@@ -9,12 +9,8 @@
       title="文件布局：int32 Na、int32 Nr；每个脉冲为 uint32 iGate + Nr 组 uint16 I/Q。默认小端，最大 64 MiB。" />
     <div class="filters">
       <el-input v-model="query" placeholder="按信号名称搜索" clearable @keyup.enter="search" @clear="search" />
-      <el-select v-model="source" placeholder="全部来源" clearable @change="search">
-        <el-option label="仿真数据" value="simulated" /><el-option label="导入数据" value="imported" />
-      </el-select>
-      <el-select v-model="band" placeholder="全部频段" clearable @change="search">
-        <el-option v-for="item in bands" :key="item.band" :label="item.band + ' 频段'" :value="item.band" />
-      </el-select>
+      <PinnedFilterSelect v-model="source" placeholder="全部来源" clearable @change="search" preference-key="echoes-source" :options="[{ value: 'simulated', label: '仿真数据' }, { value: 'imported', label: '导入数据' }]" />
+      <PinnedFilterSelect v-model="band" placeholder="全部频段" clearable @change="search" preference-key="echoes-band" :options="bands.map(item => ({ value: item.band, label: item.band + ' 频段' }))" />
       <el-button @click="search">查询</el-button><el-button @click="load">刷新</el-button>
     </div>
     <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" />
@@ -129,6 +125,7 @@
 </template>
 
 <script setup lang="ts">
+import PinnedFilterSelect from '../../components/PinnedFilterSelect.vue'
 import { ImportCancelledError } from '../../utils/duplicateImport'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'

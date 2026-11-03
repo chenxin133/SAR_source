@@ -26,9 +26,9 @@ export const chooseDuplicate = (existing: { id: string; name: string }): Promise
     }).catch(() => reject(new ImportCancelledError()))
   })
 
-export const withDuplicateChoice = async <T>(operation: (action: DuplicateAction) => Promise<T>): Promise<T> => {
+export const withDuplicateChoice = async <T>(operation: (action: DuplicateAction) => Promise<T>, initialAction: DuplicateAction = 'ask'): Promise<T> => {
   try {
-    return await operation('ask')
+    return await operation(initialAction)
   } catch (error) {
     const detail = error instanceof HttpError ? error.detail as any : undefined
     if (error instanceof HttpError && error.status === 409 && detail?.code === 'duplicate_file' && detail.existing) {

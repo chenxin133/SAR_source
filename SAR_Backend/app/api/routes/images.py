@@ -22,6 +22,7 @@ from app.deps import get_project
 from app.upload_filenames import storage_filename
 from app.scene_metadata import MAX_XML_BYTES, parse_scene_xml, decode_scene_xml, satellite_name
 from app.duplicate_files import import_lock, reuse_duplicate
+from app.raster_product import UnsupportedSingleLookError, validate_raster_product
 from app.models import Image, Project, Thumbnail
 from app.schemas.common import Envelope
 from app.schemas.images import (
@@ -243,12 +244,57 @@ def delete_image(
     return Envelope(data={"deleted": True}, request_id=getattr(request.state, "request_id", None))
 
 
+def _upload_metadata(payload):
+    try:
+        xml_content, xml_metadata = decode_scene_xml(payload.metadata_xml_base64)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    fields = ('name', 'satellite', 'acquisition_at', 'resolution', 'frequency_band', 'polarization', 'description')
+    values = {}
+    for field in fields:
+        if field in payload.model_fields_set:
+            values[field] = getattr(payload, field)
+        elif xml_metadata and xml_metadata.get(field):
+            values[field] = xml_metadata[field]
+    if isinstance(values.get('acquisition_at'), str):
+        values['acquisition_at'] = datetime.fromisoformat(values['acquisition_at'].replace('Z', '+00:00'))
+    if 'satellite' in values:
+        values['satellite'] = satellite_name(values['satellite'])
+    return values, xml_content, xml_metadata
+
+
+def _update_duplicate(db, existing, payload, values, xml_content, xml_metadata):
+    if 'resolution' in values and not (values['resolution'] or '').strip():
+        raise HTTPException(422, '分辨率为必填项')
+    for field, value in values.items():
+        if field == 'name' and not value:
+            continue
+        setattr(existing, field, value)
+    if xml_content is not None:
+        _store_scene_xml(existing, xml_content, payload.metadata_xml_filename, xml_metadata)
+    existing.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+
 @router.post("/upload/init", response_model=Envelope[UploadInitResponse])
 def upload_init(
     payload: UploadInitRequest,
     request: Request,
     project: Project = Depends(get_project),
+    db: Session = Depends(get_db),
 ):
+    with import_lock:
+        existing = db.scalar(select(Image).where(
+            Image.project_id == project.id, Image.checksum_sha256 == payload.checksum_sha256,
+            Image.size_bytes == payload.total_size,
+        ).order_by(Image.created_at, Image.id)) if payload.checksum_sha256 else None
+        if reuse_duplicate(existing, payload.duplicate_action):
+            if payload.duplicate_action == 'update':
+                values, xml_content, xml_metadata = _upload_metadata(payload)
+                _update_duplicate(db, existing, payload, values, xml_content, xml_metadata)
+            return Envelope(data=UploadInitResponse(image_id=existing.id, reused=True,
+                            updated=payload.duplicate_action == 'update'),
+                            request_id=getattr(request.state, 'request_id', None))
     info = init_upload(filename=payload.filename, total_size=payload.total_size, project_id=project.id)
     return Envelope(
         data=UploadInitResponse(upload_id=info["upload_id"], part_size=int(info["part_size"])),
@@ -294,36 +340,19 @@ def upload_complete(
         except FileNotFoundError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+        try:
+            validate_raster_product(assembled_path)
+        except UnsupportedSingleLookError as error:
+            cleanup(upload_id)
+            raise HTTPException(422, str(error)) from error
+
         existing = db.scalar(select(Image).where(
             Image.project_id == project.id, Image.checksum_sha256 == sha256,
         ).order_by(Image.created_at, Image.id))
-        try:
-            xml_content, xml_metadata = decode_scene_xml(payload.metadata_xml_base64)
-        except ValueError as error:
-            raise HTTPException(422, str(error)) from error
-        fields = ('name', 'satellite', 'acquisition_at', 'resolution', 'frequency_band', 'polarization', 'description')
-        values = {}
-        for field in fields:
-            if field in payload.model_fields_set:
-                values[field] = getattr(payload, field)
-            elif xml_metadata and xml_metadata.get(field):
-                values[field] = xml_metadata[field]
-        if isinstance(values.get('acquisition_at'), str):
-            values['acquisition_at'] = datetime.fromisoformat(values['acquisition_at'].replace('Z', '+00:00'))
-        if 'satellite' in values:
-            values['satellite'] = satellite_name(values['satellite'])
+        values, xml_content, xml_metadata = _upload_metadata(payload)
         if reuse_duplicate(existing, payload.duplicate_action):
             if payload.duplicate_action == 'update':
-                if 'resolution' in values and not (values['resolution'] or '').strip():
-                    raise HTTPException(422, '分辨率为必填项')
-                for field, value in values.items():
-                    if field == 'name' and not value:
-                        continue
-                    setattr(existing, field, value)
-                if xml_content is not None:
-                    _store_scene_xml(existing, xml_content, payload.metadata_xml_filename, xml_metadata)
-                existing.updated_at = datetime.now(timezone.utc)
-                db.commit()
+                _update_duplicate(db, existing, payload, values, xml_content, xml_metadata)
             cleanup(upload_id)
             return Envelope(data=UploadCompleteResponse(image_id=existing.id, reused=True, updated=payload.duplicate_action == 'update'),
                             request_id=getattr(request.state, "request_id", None))

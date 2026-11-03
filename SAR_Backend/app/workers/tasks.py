@@ -18,6 +18,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Annotation, Image, Sample, Thumbnail, Task
+from app.raster_product import UnsupportedSingleLookError, validate_raster_product
 from app.storage import download_object_to_file, local_object_path, put_file, use_local_storage
 from app.workers.celery_app import celery_app
 
@@ -40,6 +41,8 @@ def _levels() -> list[int]:
 
 
 def _describe_preview_error(error: Exception, local_path: str) -> str:
+    if isinstance(error, UnsupportedSingleLookError):
+        return str(error)
     raw_message = str(error).strip() or error.__class__.__name__
     normalized_candidates = {
         local_path,
@@ -195,6 +198,8 @@ def _read_preview_with_pillow(path: str, max_size: int) -> np.ndarray:
 
     with _open_raster_with_pillow(path) as img:
         numeric = img.mode in ('F', 'I') or img.mode.startswith('I;16')
+        if img.format == 'TIFF' and img.width * img.height * len(img.getbands()) * (4 if numeric else 1) > 128 * 1024 * 1024:
+            raise RuntimeError('无法分块读取该大幅 TIFF，请检查压缩编码是否受支持。')
         if img.mode.startswith('I;16'):
             # Pillow cannot bilinearly resize I;16. Float preserves every
             # uint16 value, unlike an RGB conversion that clips above 255.
@@ -210,6 +215,38 @@ def _read_preview_with_pillow(path: str, max_size: int) -> np.ndarray:
     return _normalize_raster_shape(arr)
 
 
+def _read_tiff_segments(page, max_size: int) -> np.ndarray:
+    """Sample decoded tiles/strips into a bounded preview, never a full raster."""
+    width, height = int(page.imagewidth), int(page.imagelength)
+    longest = max(width, height)
+    tw = max(1, width * min(max_size, longest) // longest)
+    th = max(1, height * min(max_size, longest) // longest)
+    channels = 3 if page.samplesperpixel >= 3 else 1
+    segment_width = page.tilewidth if page.is_tiled else width
+    segment_height = page.tilelength if page.is_tiled else min(page.rowsperstrip, height)
+    segment_samples = page.samplesperpixel if page.planarconfig == 1 else 1
+    if segment_width * segment_height * segment_samples * page.dtype.itemsize > 128 * 1024 * 1024:
+        raise RuntimeError('TIFF 单个压缩条带过大，无法在有限内存中生成预览；请先生成分块 TIFF 或概览。')
+    xs = np.minimum((np.arange(tw) * width / tw).astype(np.int64), width - 1)
+    ys = np.minimum((np.arange(th) * height / th).astype(np.int64), height - 1)
+    out = np.zeros((channels, th, tw), dtype=page.dtype)
+    for tile, position, _shape in page.segments(maxworkers=1, buffersize=8 * 1024 * 1024):
+        if tile is None:
+            continue
+        sample, depth, row, column, contig = position
+        first_channel = sample + contig
+        if depth or first_channel >= channels:
+            continue
+        y0, y1 = np.searchsorted(ys, [row, row + tile.shape[1]])
+        x0, x1 = np.searchsorted(xs, [column, column + tile.shape[2]])
+        if y0 == y1 or x0 == x1:
+            continue
+        count = min(tile.shape[3], channels - first_channel)
+        selected = tile[0][np.ix_(ys[y0:y1] - row, xs[x0:x1] - column, np.arange(count))]
+        out[first_channel:first_channel + count, y0:y1, x0:x1] = np.moveaxis(selected, -1, 0)
+    return out[0] if channels == 1 else out
+
+
 def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
     try:
         import tifffile
@@ -220,21 +257,14 @@ def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
         arr = tifffile.memmap(path, mode="r")
     except Exception:
         with tifffile.TiffFile(path) as tif:
-            if tif.series:
-                series = tif.series[0]
-                levels = list(getattr(series, "levels", None) or [series])
-                arr = None
-                for level in reversed(levels):
-                    try:
-                        arr = level.asarray()
-                        if arr is not None:
-                            break
-                    except Exception:
-                        continue
-                if arr is None:
-                    arr = series.asarray()
-            else:
-                arr = tif.asarray()
+            levels = list(tif.series[0].levels) if tif.series else []
+            page = tif.pages[0]
+            for level in levels:
+                candidate = level.pages[0]
+                if max(candidate.imagewidth, candidate.imagelength) < max_size:
+                    break
+                page = candidate
+            return _read_tiff_segments(page, max_size)
     else:
         try:
             return np.array(_sample_raster_for_preview(arr, max_size=max_size), copy=True)
@@ -246,9 +276,6 @@ def _read_preview_with_tifffile(path: str, max_size: int) -> np.ndarray:
                 except Exception:
                     pass
             del arr
-    if arr is None:
-        raise RuntimeError("Failed to read TIFF with tifffile")
-    return _sample_raster_for_preview(arr, max_size=max_size)
 
 
 def _normalize_raster_shape(arr: np.ndarray) -> np.ndarray:
@@ -328,6 +355,7 @@ def _resize_rgb(rgb_u8: np.ndarray, max_size: int) -> np.ndarray:
 
 
 def _build_preview_rgb(path: str, max_size: int) -> np.ndarray:
+    validate_raster_product(path)
     try:
         arr = _read_preview_with_gdal(path, max_size=max_size)
         rgb = _to_uint8_rgb(arr)

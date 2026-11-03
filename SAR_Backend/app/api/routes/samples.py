@@ -401,6 +401,42 @@ def create_sample(
     return Envelope(data=_sample_out(s), request_id=getattr(request.state, "request_id", None))
 
 
+def find_imported_sample(db: Session, project_id: uuid.UUID, checksum: str):
+    settings = get_settings()
+    with tempfile.TemporaryDirectory() as temporary:
+        # Older independent samples did not have fingerprints. Backfill
+        # once, streaming the original bytes; never hash a preview.
+        legacy = db.scalars(select(Sample).where(
+            Sample.project_id == project_id, Sample.image_id.is_(None),
+            Sample.checksum_sha256.is_(None), Sample.crop_storage_key.is_not(None),
+        )).all()
+        for old in legacy:
+            try:
+                original_path = local_object_path(bucket=settings.s3_bucket, key=old.crop_storage_key) if use_local_storage() else None
+                if original_path is None:
+                    original_path = Path(temporary) / "legacy.bin"
+                    download_object_to_file(bucket=settings.s3_bucket, key=old.crop_storage_key, file_path=str(original_path))
+                old.checksum_sha256 = sha256_file(original_path)
+            except FileNotFoundError:
+                continue
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
+                    raise
+        db.commit()
+        existing = db.scalar(select(Sample).where(
+            Sample.project_id == project_id, Sample.image_id.is_(None), Sample.checksum_sha256 == checksum,
+        ).order_by(Sample.created_at, Sample.id))
+        return existing
+
+
+@router.get('/{sample_id}', response_model=Envelope[SampleOut])
+def get_sample(sample_id: uuid.UUID, db: Session = Depends(get_db), project: Project = Depends(get_project)):
+    sample = db.scalar(select(Sample).where(Sample.id == sample_id, Sample.project_id == project.id))
+    if sample is None:
+        raise HTTPException(404, 'Sample not found')
+    return Envelope(data=_sample_out(sample))
+
+
 @router.post("/upload", response_model=Envelope[SampleOut])
 def upload_sample(
     request: Request,
@@ -448,28 +484,7 @@ def upload_sample(
         checksum = digest.hexdigest()
         with import_lock:
             if image_id is None and sample_id is None:
-                # Older independent samples did not have fingerprints. Backfill
-                # once, streaming the original bytes; never hash a preview.
-                legacy = db.scalars(select(Sample).where(
-                    Sample.project_id == project.id, Sample.image_id.is_(None),
-                    Sample.checksum_sha256.is_(None), Sample.crop_storage_key.is_not(None),
-                )).all()
-                for old in legacy:
-                    try:
-                        original_path = local_object_path(bucket=settings.s3_bucket, key=old.crop_storage_key) if use_local_storage() else None
-                        if original_path is None:
-                            original_path = Path(tmp) / "legacy.bin"
-                            download_object_to_file(bucket=settings.s3_bucket, key=old.crop_storage_key, file_path=str(original_path))
-                        old.checksum_sha256 = sha256_file(original_path)
-                    except FileNotFoundError:
-                        continue
-                    except ClientError as exc:
-                        if exc.response.get("Error", {}).get("Code") not in {"NoSuchKey", "404", "NotFound"}:
-                            raise
-                db.commit()
-                existing = db.scalar(select(Sample).where(
-                    Sample.project_id == project.id, Sample.image_id.is_(None), Sample.checksum_sha256 == checksum,
-                ).order_by(Sample.created_at, Sample.id))
+                existing = find_imported_sample(db, project.id, checksum)
                 if reuse_duplicate(existing, duplicate_action):
                     if duplicate_action == 'reuse':
                         return Envelope(data=_sample_out(existing), request_id=getattr(request.state, "request_id", None))

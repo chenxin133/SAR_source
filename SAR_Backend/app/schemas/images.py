@@ -69,21 +69,10 @@ class ImageDetailOut(ImageOut):
     thumbnails: list[ThumbnailOut] = []
 
 
-class UploadInitRequest(BaseModel):
-    filename: str
-    total_size: int
-
-
-class UploadInitResponse(BaseModel):
-    upload_id: str
-    part_size: int
-
-
-class UploadCompleteRequest(BaseModel):
+class UploadMetadataRequest(BaseModel):
     metadata_xml_base64: str | None = Field(default=None, max_length=2796212)
     metadata_xml_filename: str | None = None
     duplicate_action: DuplicateAction = "ask"
-    total_parts: int
     name: str | None = None
     mime_type: str | None = None
     satellite: str | None = None
@@ -92,6 +81,24 @@ class UploadCompleteRequest(BaseModel):
     frequency_band: str | None = None
     polarization: str | None = None
     description: str | None = None
+
+
+class UploadInitRequest(UploadMetadataRequest):
+    filename: str
+    total_size: int = Field(ge=1)
+    checksum_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+
+
+class UploadInitResponse(BaseModel):
+    upload_id: str | None = None
+    part_size: int | None = None
+    image_id: uuid.UUID | None = None
+    reused: bool = False
+    updated: bool = False
+
+
+class UploadCompleteRequest(UploadMetadataRequest):
+    total_parts: int
 
 
 class UploadCompleteResponse(BaseModel):

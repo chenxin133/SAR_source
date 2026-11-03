@@ -1,4 +1,5 @@
 import { withDuplicateChoice } from '../utils/duplicateImport'
+import { importPreflight } from './importPreflight'
 import { buildUrl, requestJson } from './http'
 import { unwrapEnvelope, type ApiEnvelope } from '../types/backend'
 
@@ -24,13 +25,17 @@ export const echoesApi = {
     return requestJson<{ data: EchoSignal[]; total: number }>(`/echoes?${params}`)
   },
   async upload(file: File, fields: { name: string; remark: string; byte_order: string; iq_offset: number }) {
+    const preflight = await importPreflight('echoes', file)
+    if (preflight.action === 'reuse' && preflight.existing) {
+      return unwrapEnvelope(await requestJson<ApiEnvelope<EchoSignal>>(`/echoes/${preflight.existing.id}`))
+    }
     const form = new FormData()
     form.append('file', file)
     Object.entries(fields).forEach(([key, value]) => form.append(key, String(value)))
     return unwrapEnvelope(await withDuplicateChoice((action) => {
       form.set('duplicate_action', action)
       return requestJson<ApiEnvelope<EchoSignal>>('/echoes/upload', { method: 'POST', body: form })
-    }))
+    }, preflight.action))
   },
   async simulate(payload: EchoSimulation) {
     return unwrapEnvelope(await requestJson<ApiEnvelope<EchoSignal>>('/echoes/simulate', {

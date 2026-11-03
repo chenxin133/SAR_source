@@ -12,24 +12,12 @@
 
     <div class="filter-bar">
       <el-input v-model="keyword" placeholder="筛选名称 / ID" clearable style="width: 240px" />
-      <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px">
-        <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
-      <el-select v-model="satelliteFilter" placeholder="全部卫星源" clearable style="width: 180px">
-        <el-option v-for="item in satelliteOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px">
-        <el-option v-for="item in regionOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="frequencyBandFilter" placeholder="全部数据频段" clearable style="width: 180px">
-        <el-option v-for="item in frequencyBandOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px">
-        <el-option v-for="item in polarizationOptions" :key="item" :label="item" :value="item" />
-      </el-select>
-      <el-select v-model="resolutionFilter" placeholder="全部分辨率" clearable filterable style="width: 180px">
-        <el-option v-for="item in resolutionOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
+      <PinnedFilterSelect v-model="statusFilter" placeholder="全部状态" clearable style="width: 140px" preference-key="raw-statusFilter" :options="statusOptions" />
+      <PinnedFilterSelect v-model="satelliteFilter" placeholder="全部卫星源" clearable style="width: 180px" preference-key="raw-satelliteFilter" :options="satelliteOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="regionFilter" placeholder="全部地区" clearable style="width: 180px" preference-key="raw-regionFilter" :options="regionOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="frequencyBandFilter" placeholder="全部数据频段" clearable style="width: 180px" preference-key="raw-frequencyBandFilter" :options="frequencyBandOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="polarizationFilter" placeholder="全部极化方式" clearable style="width: 180px" preference-key="raw-polarizationFilter" :options="polarizationOptions.map(value => ({ value, label: value }))" />
+      <PinnedFilterSelect v-model="resolutionFilter" placeholder="全部分辨率" clearable filterable style="width: 180px" preference-key="raw-resolutionFilter" :options="resolutionOptions" />
     </div>
 
     <!-- Data Table -->
@@ -129,6 +117,7 @@
 </template>
 
 <script setup lang="ts">
+import PinnedFilterSelect from '../../components/PinnedFilterSelect.vue'
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

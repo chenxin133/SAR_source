@@ -42,8 +42,12 @@ export type ApiThumbnailOut = {
 }
 
 export type ApiUploadInitResponse = {
-  upload_id: string
-  part_size: number
+  upload_id?: string | null
+  part_size?: number | null
+  image_id?: string | null
+  reused?: boolean
+  updated?: boolean
+  duplicate_action?: import('../utils/duplicateImport').DuplicateAction
 }
 
 export type ApiUploadCompleteResponse = {

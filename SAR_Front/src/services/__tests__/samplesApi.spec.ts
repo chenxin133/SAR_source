@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { samplesApi } from '../samplesApi'
+vi.mock('../importPreflight', () => ({ importPreflight: async () => ({ action: 'ask', existing: null }) }))
 import type { SarSample } from '../../types/samples'
 import { requestJson } from '../http'
 
