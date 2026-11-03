@@ -2,7 +2,7 @@ import { withDuplicateChoice } from '../utils/duplicateImport'
 import { importPreflight } from './importPreflight'
 import { buildUrl, requestJson, readResponseError } from './http'
 import { unwrapEnvelope, type ApiEnvelope } from '../types/backend'
-import type { SarSample } from '../types/samples'
+import type { SampleSummary, SarSample } from '../types/samples'
 
 type ApiSample = {
   id: string
@@ -29,11 +29,8 @@ const fetchBlob = async (url?: string | null) => {
   return await resp.blob()
 }
 
-const mapSample = async (row: ApiSample): Promise<SarSample> => {
+const mapSummary = (row: ApiSample): SampleSummary => {
   const roi = row.roi ?? {}
-  const image = await fetchBlob(row.image_url)
-  if (!image) throw new Error(`样本 ${row.id} 缺少图片文件`)
-  const thumbnail = await fetchBlob(row.thumbnail_url).catch(() => undefined)
   return {
     id: row.id,
     name: row.name || row.id,
@@ -51,15 +48,25 @@ const mapSample = async (row: ApiSample): Promise<SarSample> => {
     format: roi.format === 'image/tiff' ? 'image/tiff' : roi.format === 'image/jpeg' ? 'image/jpeg' : 'image/png',
     width: Number(roi.width ?? 0),
     height: Number(roi.height ?? 0),
-    image,
-    thumbnail,
+    imageUrl: row.image_url || undefined,
+    thumbnailUrl: row.thumbnail_url || undefined,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime()
   }
 }
 
+const mapSample = async (row: ApiSample): Promise<SarSample> => {
+  const [image, thumbnail] = await Promise.all([
+    fetchBlob(row.image_url), fetchBlob(row.thumbnail_url).catch(() => undefined)
+  ])
+  if (!image) throw new Error(`样本 ${row.id} 缺少图片文件`)
+  return { ...mapSummary(row), image, thumbnail }
+}
+
+const getRow = async (id: string) => unwrapEnvelope(await requestJson<ApiEnvelope<ApiSample>>(`/samples/${encodeURIComponent(id)}`))
+
 export const samplesApi = {
-  async list(): Promise<SarSample[]> {
+  async list(): Promise<SampleSummary[]> {
     const rows: ApiSample[] = []
     for (let offset = 0; ; offset += 200) {
       const res = await requestJson<ApiEnvelope<ApiSample[]>>(`/samples?limit=200&offset=${offset}`, { method: 'GET' })
@@ -67,7 +74,24 @@ export const samplesApi = {
       rows.push(...page)
       if (page.length < 200) break
     }
-    return await Promise.all(rows.map(mapSample))
+    return rows.map(mapSummary)
+  },
+
+  async get(id: string): Promise<SarSample | undefined> {
+    try { return await mapSample(await getRow(id)) }
+    catch (error) {
+      if ((error as { status?: number })?.status === 404) return undefined
+      throw error
+    }
+  },
+
+  async previewImage(id: string): Promise<Blob> {
+    const row = await getRow(id)
+    const sample = mapSummary(row)
+    // Older PNG thumbnails lost polygon transparency; use the original PNG.
+    const image = await fetchBlob(sample.format === 'image/png' ? sample.imageUrl : sample.thumbnailUrl || sample.imageUrl)
+    if (!image) throw new Error(`样本 ${id} 缺少图片文件`)
+    return image
   },
 
   async put(sample: SarSample): Promise<SarSample> {

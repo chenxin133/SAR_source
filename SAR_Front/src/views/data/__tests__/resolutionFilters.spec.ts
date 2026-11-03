@@ -1,18 +1,20 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { reactive, nextTick } from 'vue'
-import ElementPlus, { ElSelect, ElTable } from 'element-plus'
+import ElementPlus, { ElPagination, ElSelect, ElTable } from 'element-plus'
 import RawDataView from '../RawDataView.vue'
 import SampleDataView from '../SampleDataView.vue'
 import { UNKNOWN_RESOLUTION } from '../../../utils/resolution'
+import { samplesRepo } from '../../../repositories/samplesRepo'
 
-const state = vi.hoisted(() => ({ images: [] as any[], samples: [] as any[], exportBundle: vi.fn(), ensurePreview: vi.fn() }))
+const state = vi.hoisted(() => ({ images: [] as any[], samples: [] as any[], exportBundle: vi.fn(), ensurePreview: vi.fn(), previewImage: vi.fn() }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock('../../../config/storage', () => ({ getStorageMode: () => 'backend' }))
 vi.mock('../../../stores/rawData', () => ({ useRawDataStore: () => reactive({ images: state.images, fetchImages: vi.fn(), loading: false }) }))
 vi.mock('../../../repositories/imagesRepo', () => ({ imagesRepo: { list: async () => state.images, ensureHighResolutionPreview: state.ensurePreview } }))
-vi.mock('../../../repositories/samplesRepo', () => ({ samplesRepo: { list: async () => state.samples, exportBundle: state.exportBundle, changedEventName: 'test-samples-changed' } }))
+vi.mock('../../../repositories/samplesRepo', () => ({ samplesRepo: { list: async () => state.samples, previewImage: state.previewImage, exportBundle: state.exportBundle, changedEventName: 'test-samples-changed' } }))
 let wrapper: ReturnType<typeof mount>
+beforeEach(() => { state.previewImage.mockReset().mockImplementation(async sample => sample.format === 'image/png' ? sample.image : sample.thumbnail || sample.image) })
 afterEach(() => { wrapper?.unmount(); vi.restoreAllMocks(); state.exportBundle.mockReset(); state.ensurePreview.mockReset() })
 
 const setFilter = async (placeholder: string, value: string) => {
@@ -84,7 +86,79 @@ it('previews the original polygon PNG instead of an old thumbnail that lost tran
   wrapper = mount(SampleDataView, { global: { plugins: [ElementPlus], stubs: { ArrowDown: true, Refresh: true } } })
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === '预览')!.trigger('click')
+  await flushPromises()
   expect(create).toHaveBeenCalledWith(image)
+})
+
+it('paginates 188 metadata records and preserves checked rows across pages for export', async () => {
+  state.images = []
+  state.samples = Array.from({ length: 188 }, (_, index) => ({ id: `sample-${index}`, name: `sample-${index}`, imageId: '',
+    category: index % 2 ? 'SHIP' : 'AIRCRAFT', annotationType: 'rect', annotationId: '', resolution: '0.5m', frequencyBand: index % 2 ? 'C' : 'X',
+    width: 512, height: 512, createdAt: 0, updatedAt: 0 }))
+  state.exportBundle.mockResolvedValue(new Blob(['zip']))
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:download')
+  wrapper = mount(SampleDataView, { global: { plugins: [ElementPlus], stubs: {
+    ArrowDown: true, Refresh: true, ElDropdown: { template: '<div><slot/></div>' }
+  } } })
+  await flushPromises()
+  const vm = (wrapper.vm as any).$.setupState
+  const table = wrapper.findComponent(ElTable).vm as any
+  expect(rowIds()).toHaveLength(25)
+  expect(wrapper.findComponent(ElPagination).props('total')).toBe(188)
+  table.toggleRowSelection(vm.pagedTableData[0], true)
+  vm.currentPage = 2; await nextTick(); await flushPromises()
+  expect(rowIds()[0]).toBe('sample-25')
+  table.toggleRowSelection(vm.pagedTableData[0], true); await nextTick()
+  expect(vm.selectedRows.map((row: any) => row.id)).toEqual(['sample-0', 'sample-25'])
+  await vm.handleBatchExport('origin')
+  expect(state.exportBundle.mock.calls[0][0].map((sample: any) => sample.id)).toEqual(['sample-0', 'sample-25'])
+  vm.currentPage = 4; await nextTick()
+  await setFilter('全部类别', 'AIRCRAFT')
+  expect(vm.currentPage).toBe(1)
+  expect(wrapper.findComponent(ElPagination).props('total')).toBe(94)
+  expect(vm.selectedRows.map((row: any) => row.id)).toEqual(['sample-0'])
+  vm.exportScope = 'filtered'
+  await vm.handleBatchExport('origin')
+  expect(state.exportBundle.mock.calls[1][0]).toHaveLength(94)
+  expect(rowIds()).toHaveLength(25)
+  vm.keyword = 'no such sample'; await nextTick()
+  expect(rowIds()).toHaveLength(0)
+  vm.keyword = ''; await nextTick(); await flushPromises()
+  expect(vm.selectedRows.map((row: any) => row.id)).toEqual(['sample-0'])
+  expect(table.getSelectionRows().map((row: any) => row.id)).toContain('sample-0')
+  await wrapper.findAll('button').find(button => button.text() === '清空勾选')!.trigger('click')
+  expect(vm.selectedRows).toHaveLength(0)
+}, 15000)
+
+it('coalesces overlapping refreshes and refreshes once more after a pending mutation', async () => {
+  state.images = []; state.samples = []
+  let resolve!: (rows: any[]) => void
+  const list = vi.spyOn(samplesRepo, 'list').mockReturnValueOnce(new Promise(r => { resolve = r })).mockResolvedValue([])
+  wrapper = mount(SampleDataView, { global: { plugins: [ElementPlus], stubs: { ArrowDown: true, Refresh: true } } })
+  const vm = (wrapper.vm as any).$.setupState
+  const first = vm.reload(), second = vm.reload()
+  expect(first).toBe(second); expect(list).toHaveBeenCalledTimes(1)
+  window.dispatchEvent(new Event('test-samples-changed')); window.dispatchEvent(new Event('focus'))
+  expect(list).toHaveBeenCalledTimes(1)
+  resolve([]); await first; await flushPromises()
+  expect(list).toHaveBeenCalledTimes(2)
+})
+
+it('does not let a closed or older preview replace the current preview', async () => {
+  state.images = []; state.samples = []
+  let finishFirst!: (blob: Blob) => void
+  const current = new Blob(['current'])
+  state.previewImage.mockReturnValueOnce(new Promise(r => { finishFirst = r })).mockResolvedValueOnce(current)
+  const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:current')
+  wrapper = mount(SampleDataView, { global: { plugins: [ElementPlus], stubs: { ArrowDown: true, Refresh: true } } })
+  await flushPromises()
+  const vm = (wrapper.vm as any).$.setupState
+  const first = vm.openPreview({ raw: { id: 'first' } })
+  vm.clearPreview()
+  await vm.openPreview({ raw: { id: 'second' } })
+  finishFirst(new Blob(['old'])); await first
+  expect(create).toHaveBeenCalledExactlyOnceWith(current)
+  expect(vm.previewUrl).toBe('blob:current')
 })
 
 it('links raw image facets and keeps alternatives within the current facet available', async () => {

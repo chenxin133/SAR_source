@@ -23,3 +23,8 @@ export type SarSample = {
   createdAt: number
   updatedAt: number
 }
+
+export type SampleSummary = Omit<SarSample, 'image' | 'thumbnail'> & {
+  imageUrl?: string
+  thumbnailUrl?: string
+}

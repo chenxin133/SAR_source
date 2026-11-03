@@ -3,7 +3,7 @@ import { sampleName, buildSampleXml } from '../utils/sampleMetadata'
 import type { SarImage } from '../types/sar'
 import { resolutionMeters, EXPORT_RESOLUTIONS } from '../utils/resolution'
 import { IdbStore } from './idb'
-import type { SarSample } from '../types/samples'
+import type { SampleSummary, SarSample } from '../types/samples'
 import { getStorageMode } from '../config/storage'
 import { samplesApi } from '../services/samplesApi'
 
@@ -24,7 +24,7 @@ const emitSamplesChanged = () => {
 export const samplesRepo = {
   changedEventName: SAMPLES_CHANGED_EVENT,
 
-  async list(): Promise<SarSample[]> {
+  async list(): Promise<SampleSummary[]> {
     if (getStorageMode() === 'backend') return await samplesApi.list()
     const records = await store.getAll()
     records.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -32,9 +32,16 @@ export const samplesRepo = {
   },
 
   async get(id: string): Promise<SarSample | undefined> {
-    if (getStorageMode() === 'backend') return (await samplesApi.list()).find((sample) => sample.id === id)
+    if (getStorageMode() === 'backend') return await samplesApi.get(id)
     const record = await store.get(id)
     return record?.data
+  },
+
+  async previewImage(sample: SampleSummary): Promise<Blob> {
+    if (getStorageMode() === 'backend') return samplesApi.previewImage(sample.id)
+    const saved = await samplesRepo.get(sample.id)
+    if (!saved) throw new Error('样本不存在或已被删除')
+    return saved.format === 'image/png' ? saved.image : saved.thumbnail || saved.image
   },
 
   async put(sample: SarSample): Promise<SarSample> {
@@ -86,12 +93,14 @@ export const samplesRepo = {
     return saved
   },
 
-  async exportBundle(samples: SarSample[], format: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff', target?: number, sources?: Map<string, SarImage>): Promise<Blob> {
+  async exportBundle(samples: SampleSummary[], format: 'source' | 'image/png' | 'image/jpeg' | 'image/tiff', target?: number, sources?: Map<string, SarImage>): Promise<Blob> {
     if (getStorageMode() === 'backend') return samplesApi.exportBundle(samples.map((sample) => sample.id), format, target)
     const archive = new JSZip()
     for (const original of samples) {
+      const sourceBlob = 'image' in original && original.image instanceof Blob ? original.image : (await samplesRepo.get(original.id))?.image
+      if (!sourceBlob) throw new Error('样本图片不存在或已被删除')
       const source = sources?.get(original.imageId)
-      const sample = { ...original, resolution: original.resolution || source?.resolution,
+      const sample = { ...original, image: sourceBlob, resolution: original.resolution || source?.resolution,
         frequencyBand: original.frequencyBand || source?.frequencyBand, sceneMetadata: original.sceneMetadata || source?.sceneMetadata }
       if (!sample.sequenceNo) await samplesRepo.put(sample)
       let image = await samplesRepo.exportBlob(sample, format, target, source?.resolution)

@@ -165,7 +165,7 @@ import { imagesRepo } from '../../repositories/imagesRepo'
 import { imagesApi } from '../../services/imagesApi'
 import { annotationsRepo } from '../../repositories/annotationsRepo'
 import { samplesRepo } from '../../repositories/samplesRepo'
-import type { SarSample } from '../../types/samples'
+import type { SampleSummary, SarSample } from '../../types/samples'
 import { getStorageMode } from '../../config/storage'
 
 const route = useRoute()
@@ -1108,7 +1108,7 @@ const buildSampleFromAnnotation = async (
   ann: SarAnnotation,
   src: HTMLImageElement | HTMLCanvasElement,
   name: string,
-  existing?: SarSample
+  existing?: SampleSummary
 ): Promise<SarSample | null> => {
   if (!currentImageId.value) return null
   const region = getAnnotationCropRegion(ann)

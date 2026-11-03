@@ -1,5 +1,5 @@
 <template>
-  <div class="sample-data">
+  <div class="sample-data" v-loading="isLoading">
     <div class="header-actions">
       <h2>样本数据管理</h2>
       <div class="header-buttons">
@@ -21,7 +21,7 @@
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button type="primary" @click="reload">
+        <el-button type="primary" :loading="isLoading" @click="reload">
           <el-icon><Refresh /></el-icon> 刷新
         </el-button>
       </div>
@@ -43,16 +43,17 @@
         <el-radio-button value="selected">勾选样本（{{ selectedRows.length }}）</el-radio-button>
         <el-radio-button value="filtered">全部筛选结果（{{ filteredTableData.length }}）</el-radio-button>
       </el-radio-group>
-      <span>勾选表格左侧复选框；导出包含影像和配套 XML。</span>
+      <el-button v-if="selectedIds.length" link @click="sampleTable?.clearSelection()">清空勾选</el-button>
+      <span>支持跨页勾选；表头复选框仅选择当前页。导出包含影像和配套 XML。</span>
     </div>
 
-    <el-table v-if="filteredTableData.length" :data="filteredTableData" row-key="id" style="width: 100%" border @selection-change="handleSelectionChange">
-      <el-table-column type="selection" width="48" />
-      <el-table-column prop="id" label="样本ID" width="120" />
-      <el-table-column prop="name" label="名称" min-width="140" />
+    <el-table ref="sampleTable" v-show="filteredTableData.length" :data="pagedTableData" row-key="id" style="width: 100%" border @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" :reserve-selection="true" />
+      <el-table-column prop="id" label="样本ID" width="120" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
       <el-table-column prop="category" label="类别" width="140" />
-      <el-table-column prop="source" label="来源影像" min-width="180" />
-      <el-table-column prop="annotation" label="标注" width="220" />
+      <el-table-column prop="source" label="来源影像" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="annotation" label="标注" width="220" show-overflow-tooltip />
       <el-table-column label="分辨率" width="140">
         <template #default="{ row }">{{ resolutionLabel(row.resolution) }}</template>
       </el-table-column>
@@ -62,7 +63,7 @@
         <template #default="scope">
           <el-button size="small" type="primary" plain @click="openPreview(scope.row)">预览</el-button>
           <el-button size="small" type="success" plain :disabled="!canOpenAnnotate(scope.row.raw)" @click="openAnnotate(scope.row)">标注</el-button>
-          <el-dropdown trigger="click" @command="(cmd: unknown) => handleExportOne(scope.row.raw, cmd)">
+          <el-dropdown trigger="click" :persistent="false" @command="(cmd: unknown) => handleExportOne(scope.row.raw, cmd)">
             <el-button size="small" plain>导出<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -84,12 +85,20 @@
       </el-table-column>
     </el-table>
 
-    <div v-else class="empty-state">
+    <div v-if="!filteredTableData.length" class="empty-state">
       <el-empty :description="tableEmptyText" />
     </div>
 
-    <el-dialog v-model="previewVisible" title="样本预览" width="760px" destroy-on-close @closed="clearPreview">
-      <el-image v-if="previewUrl" class="sample-preview-image" :src="previewUrl" fit="contain" style="width: 100%; height: 420px" />
+    <el-config-provider :locale="zhCn">
+      <el-pagination v-if="filteredTableData.length" class="sample-pagination" v-model:current-page="currentPage" v-model:page-size="pageSize"
+        :total="filteredTableData.length" :page-sizes="[25, 50, 100]" layout="total, sizes, prev, pager, next" />
+    </el-config-provider>
+
+    <el-dialog v-model="previewVisible" title="样本预览" width="760px" destroy-on-close @close="clearPreview">
+      <div v-loading="previewLoading" class="preview-image-wrap">
+        <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" />
+        <el-image v-if="previewUrl" class="sample-preview-image" :src="previewUrl" fit="contain" style="width: 100%; height: 420px" />
+      </div>
       <div v-if="previewSample" class="preview-meta">
         <div>名称：{{ previewSample.name }}</div>
         <div>类别：{{ previewSample.category || '未分类' }}</div>
@@ -173,19 +182,20 @@ import XmlMetadataPicker from '../../components/XmlMetadataPicker.vue'
 import type { XmlAttachment } from '../../types/metadata'
 import { applyXmlAutofill, clearXmlAutofill } from '../../utils/xmlAutofill'
 import { ImportCancelledError } from '../../utils/duplicateImport'
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type UploadFile, type UploadFiles, type UploadInstance, type UploadUserFile } from 'element-plus'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import { ElMessage, ElMessageBox, type FormInstance, type TableInstance, type UploadFile, type UploadFiles, type UploadInstance, type UploadUserFile } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { imagesRepo } from '../../repositories/imagesRepo'
 import { samplesRepo } from '../../repositories/samplesRepo'
 import type { SarImage } from '../../types/sar'
-import type { SarSample } from '../../types/samples'
+import type { SampleSummary, SarSample } from '../../types/samples'
 import { unpackImageDescription } from '../../utils/imageMetadata'
 import { buildResolutionOptions, resolutionKey, resolutionLabel, coarserResolutions } from '../../utils/resolution'
 import { buildLocalSampleImage, isAllowedSampleFile, SAMPLE_UPLOAD_ACCEPT } from '../../utils/sampleUpload'
 
 const exportResolution = ref<number | ''>('')
-const effectiveResolution = (sample: SarSample) => sample.resolution || imageMetaById.value.get(sample.imageId)?.resolution || ''
+const effectiveResolution = (sample: SampleSummary) => sample.resolution || imageMetaById.value.get(sample.imageId)?.resolution || ''
 const batchResolutionOptions = computed(() => coarserResolutions(batchRows.value.map((row) => row.resolution)))
 const router = useRouter()
 const route = useRoute()
@@ -213,17 +223,24 @@ type Row = {
   annotation: string
   size: string
   time: string
-  raw: SarSample
+  raw: SampleSummary
 }
 
-const samples = ref<SarSample[]>([])
+const samples = shallowRef<SampleSummary[]>([])
+const sampleTable = ref<TableInstance>()
+const isLoading = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(25)
 const isBatchExporting = ref(false)
 const exportScope = ref<'selected' | 'filtered'>('selected')
 const selectedIds = ref<string[]>([])
-const selectedRows = computed(() => filteredTableData.value.filter(row => selectedIds.value.includes(row.id)))
+const selectedRows = computed(() => {
+  const ids = new Set(selectedIds.value)
+  return filteredTableData.value.filter(row => ids.has(row.id))
+})
 const batchRows = computed(() => exportScope.value === 'selected' ? selectedRows.value : filteredTableData.value)
 const handleSelectionChange = (rows: Row[]) => { selectedIds.value = rows.map(row => row.id) }
-const images = ref<SarImage[]>([])
+const images = shallowRef<SarImage[]>([])
 const keyword = ref('')
 const categoryFilter = ref('')
 const annotationFilter = ref('')
@@ -251,8 +268,8 @@ const imageMetaById = computed(() => {
   return map
 })
 
-const isLocalSample = (sample: SarSample) => !sample.imageId || sample.imageId.startsWith('local-upload:')
-const canOpenAnnotate = (sample: SarSample) => !isLocalSample(sample) && imageMetaById.value.has(sample.imageId)
+const isLocalSample = (sample: SampleSummary) => !sample.imageId || sample.imageId.startsWith('local-upload:')
+const canOpenAnnotate = (sample: SampleSummary) => !isLocalSample(sample) && imageMetaById.value.has(sample.imageId)
 
 const formatTime = (ts: number) => {
   const d = new Date(ts)
@@ -317,6 +334,11 @@ const filterRows = (omit?: SampleFilter): Row[] => {
   })
 }
 const filteredTableData = computed(() => filterRows())
+const pagedTableData = computed(() => filteredTableData.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+watch([keyword, categoryFilter, annotationFilter, sourceFilter, regionFilter, frequencyBandFilter, polarizationFilter, resolutionFilter, pageSize], () => { currentPage.value = 1 })
+watch(() => filteredTableData.value.length, total => {
+  currentPage.value = Math.min(currentPage.value, Math.max(1, Math.ceil(total / pageSize.value)))
+})
 
 const hasActiveFilters = computed(() => {
   return [resolutionFilter.value, keyword.value, categoryFilter.value, annotationFilter.value, sourceFilter.value, regionFilter.value, frequencyBandFilter.value, polarizationFilter.value].some(
@@ -325,25 +347,42 @@ const hasActiveFilters = computed(() => {
 })
 
 const tableEmptyText = computed(() => {
+  if (isLoading.value) return '正在加载样本数据'
   return hasActiveFilters.value ? '没有匹配的样本数据' : '暂无样本数据'
 })
 
 const previewVisible = ref(false)
-const previewSample = ref<SarSample | null>(null)
+const previewSample = shallowRef<SampleSummary | null>(null)
 const previewUrl = ref<string>('')
+const previewLoading = ref(false)
+const previewError = ref('')
+let previewRequest = 0
+let disposed = false
 
 const clearPreview = () => {
+  previewRequest++
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
   previewSample.value = null
+  previewLoading.value = false
+  previewError.value = ''
 }
 
-const openPreview = (row: Row) => {
+const openPreview = async (row: Row) => {
   clearPreview()
+  const request = previewRequest
   previewSample.value = row.raw
-  // Legacy PNG thumbnails discarded alpha; the full sample retains its mask.
-  previewUrl.value = URL.createObjectURL(row.raw.format === 'image/png' ? row.raw.image : row.raw.thumbnail || row.raw.image)
   previewVisible.value = true
+  previewLoading.value = true
+  try {
+    const image = await samplesRepo.previewImage(row.raw)
+    if (disposed || request !== previewRequest || !previewVisible.value) return
+    previewUrl.value = URL.createObjectURL(image)
+  } catch (error: any) {
+    if (request === previewRequest && !disposed) previewError.value = error?.message || '样本预览加载失败'
+  } finally {
+    if (request === previewRequest) previewLoading.value = false
+  }
 }
 
 const openAnnotate = (row: Row) => {
@@ -362,11 +401,11 @@ const triggerDownload = (blob: Blob, filename: string) => {
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
   window.setTimeout(() => URL.revokeObjectURL(url), 1500)
 }
-const exportOne = async (sample: SarSample, command: ExportCommand, targetResolution?: number) => {
+const exportOne = async (sample: SampleSummary, command: ExportCommand, targetResolution?: number) => {
   const bundle = await samplesRepo.exportBundle([sample], command === 'origin' ? 'source' : command, targetResolution, imageMetaById.value)
   triggerDownload(bundle, `${sample.name}.zip`)
 }
-const handleExportOne = async (sample: SarSample, command: unknown) => {
+const handleExportOne = async (sample: SampleSummary, command: unknown) => {
   try {
     const value = String(command)
     const target = value.startsWith('downsample:') ? Number(value.split(':')[1]) : undefined
@@ -396,27 +435,37 @@ const handleBatchExport = async (command: unknown) => {
   }
 }
 
-const reload = async () => {
-  try {
-    const [sampleList, imageList] = await Promise.all([samplesRepo.list(), imagesRepo.list().catch(() => [])])
-    samples.value = sampleList
-    images.value = imageList
-    const highlightId = typeof route.query.highlight === 'string' ? route.query.highlight : ''
-    if (highlightId) {
-      const sample = sampleList.find((item) => item.id === highlightId)
-      if (sample) openPreview({ raw: sample } as Row)
-      const query = { ...route.query }
-      delete query.highlight
-      void router.replace({ query })
-    }
-  } catch (e: any) {
-    samples.value = []
-    images.value = []
-    ElMessage.error(e?.message ? `样本加载失败：${e.message}` : '样本加载失败')
-  }
+let reloadPromise: Promise<void> | null = null
+let reloadAgain = false
+const reload = (): Promise<void> => {
+  if (reloadPromise) return reloadPromise
+  isLoading.value = true
+  reloadPromise = (async () => {
+    try {
+      do {
+        reloadAgain = false
+        const [sampleList, imageList] = await Promise.all([samplesRepo.list(), imagesRepo.list().catch(() => images.value)])
+        if (disposed) return
+        samples.value = sampleList
+        images.value = imageList
+        const highlightId = typeof route.query.highlight === 'string' ? route.query.highlight : ''
+        if (highlightId) {
+          const sample = sampleList.find((item) => item.id === highlightId)
+          if (sample) void openPreview({ raw: sample } as Row)
+          const query = { ...route.query }
+          delete query.highlight
+          void router.replace({ query })
+        }
+      } while (reloadAgain && !disposed)
+    } catch (e: any) {
+      if (!disposed) ElMessage.error(e?.message ? `样本加载失败：${e.message}` : '样本加载失败')
+    } finally { isLoading.value = false; reloadPromise = null }
+  })()
+  return reloadPromise
 }
 
 const handleSamplesChanged = () => {
+  if (reloadPromise) { reloadAgain = true; return }
   void reload()
 }
 
@@ -572,12 +621,16 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  clearPreview()
   window.removeEventListener(samplesRepo.changedEventName, handleSamplesChanged)
   window.removeEventListener('focus', handleSamplesChanged)
 })
 </script>
 
 <style scoped>
+.sample-pagination { justify-content: flex-end; margin-top: 16px; }
+.preview-image-wrap { min-height: 120px; }
 .batch-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .batch-scope > span { color: #909399; font-size: 12px; }
 .header-actions {
